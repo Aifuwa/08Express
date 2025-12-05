@@ -3,14 +3,20 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:io';
+import 'package:intl/intl.dart'; // REQUIRED FOR DATE FORMATTING
 import 'package:image_picker/image_picker.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:provider/provider.dart';
-import 'package:eight_express/providers/cart_provider.dart';
-import 'package:eight_express/screens/home_screen.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:logger/logger.dart';
+
+// Imports
+import 'package:eight_express/providers/cart_provider.dart';
+import 'package:eight_express/providers/user_provider.dart';
+import 'package:eight_express/screens/home_screen.dart';
+import 'package:eight_express/screens/user_addresses_screen.dart';
+import 'package:eight_express/models/app_user.dart';
 
 final _logger = Logger(
   printer: PrettyPrinter(methodCount: 0, colors: true, printEmojis: true),
@@ -32,13 +38,47 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   String? _uploadMessage;
 
   DeliveryMethod _selectedDeliveryMethod = DeliveryMethod.pickup;
-  final TextEditingController _addressController = TextEditingController();
+  
+  // Track selected address object
+  UserAddress? _selectedUserAddress;
+  
   final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
 
   @override
-  void dispose() {
-    _addressController.dispose();
-    super.dispose();
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final userProvider = Provider.of<UserProvider>(context, listen: false);
+      final addresses = userProvider.appUser?.addresses ?? [];
+      
+      if (addresses.isNotEmpty) {
+        try {
+          final defaultAddr = addresses.firstWhere(
+            (a) => a.isDefault, 
+            orElse: () => addresses.first
+          );
+          setState(() {
+            _selectedUserAddress = defaultAddr;
+          });
+        } catch (e) {
+          setState(() {
+            _selectedUserAddress = null;
+          });
+        }
+      }
+    });
+  }
+
+  // --- LOGIC: Delivery Date Calculator ---
+  String _getDeliveryEstimate() {
+    DateTime orderDate = DateTime.now();
+    // Start date = Today + 1 day
+    DateTime start = orderDate.add(const Duration(days: 1));
+    // End date = Today + 3 days
+    DateTime end = orderDate.add(const Duration(days: 3));
+
+    final DateFormat formatter = DateFormat('MMM d');
+    return "Estimated between ${formatter.format(start)} and ${formatter.format(end)}";
   }
 
   void _copyToClipboard(String text, String label) {
@@ -109,7 +149,18 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     final cartProvider = Provider.of<CartProvider>(context, listen: false);
 
     if (cartProvider.items.isEmpty) return;
-    if (_selectedDeliveryMethod == DeliveryMethod.delivery && !_formKey.currentState!.validate()) return;
+    
+    if (_selectedDeliveryMethod == DeliveryMethod.delivery) {
+      if (_selectedUserAddress == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Please select a delivery address'), 
+            backgroundColor: Colors.red
+          ),
+        );
+        return;
+      }
+    }
 
     final User? currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser == null) {
@@ -139,9 +190,13 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         'imageUrl': cartItem.imageUrl,
       }).toList();
 
-      String shippingAddress = _selectedDeliveryMethod == DeliveryMethod.pickup
-          ? "STORE PICKUP"
-          : _addressController.text.trim();
+      String shippingAddress;
+      if (_selectedDeliveryMethod == DeliveryMethod.pickup) {
+        shippingAddress = "STORE PICKUP";
+      } else {
+        final addr = _selectedUserAddress!;
+        shippingAddress = "${addr.street}, ${addr.city}, ${addr.state} ${addr.zipCode}, ${addr.country}";
+      }
 
       await FirebaseFirestore.instance.collection('orders').add({
         'userId': currentUser.uid,
@@ -159,7 +214,6 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       cartProvider.clearCart();
 
       if (mounted) {
-        // --- CHANGE: Navigate to the Success Screen ---
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(builder: (ctx) => const OrderSuccessScreen()),
         );
@@ -175,8 +229,14 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
   @override
   Widget build(BuildContext context) {
     final cart = Provider.of<CartProvider>(context);
+    final userProvider = Provider.of<UserProvider>(context);
+    final List<UserAddress> userAddresses = userProvider.appUser?.addresses ?? [];
+
     final double deliveryFee = _calculateDeliveryFee(cart);
     final double grandTotal = widget.totalAmount + deliveryFee;
+
+    // Calculate dynamic delivery text
+    final String deliveryText = _getDeliveryEstimate();
 
     return Scaffold(
       backgroundColor: Colors.grey[50],
@@ -191,6 +251,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                   padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
                   child: Column(
                     children: [
+                      // --- DELIVERY METHOD SECTION ---
                       _buildSectionHeader('Delivery Method'),
                       Container(
                         decoration: BoxDecoration(
@@ -203,7 +264,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                             _buildRadioTile(
                               value: DeliveryMethod.pickup,
                               title: 'Store Pickup',
-                              subtitle: 'Max 3 days wait. Late fees apply after.',
+                              subtitle: 'Pickup within 3 days. Late fees apply after.',
                               icon: Icons.storefront,
                               warningColor: Colors.orange,
                             ),
@@ -211,7 +272,8 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                             _buildRadioTile(
                               value: DeliveryMethod.delivery,
                               title: 'Home Delivery',
-                              subtitle: 'Delivery within 3 days. Fees apply.',
+                              // Use the dynamic date string here
+                              subtitle: '$deliveryText. Fees apply.',
                               icon: Icons.local_shipping,
                               warningColor: Colors.green,
                               feeInfo: 'Fee: ₦${deliveryFee.toStringAsFixed(0)}',
@@ -219,24 +281,121 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                           ],
                         ),
                       ),
+                      
+                      // --- ADDRESS SELECTION LOGIC ---
                       if (_selectedDeliveryMethod == DeliveryMethod.delivery) ...[
                         const SizedBox(height: 15),
-                         TextFormField(
-                          controller: _addressController,
-                          style: const TextStyle(fontSize: 14),
-                          decoration: InputDecoration(
-                            labelText: 'Delivery Address',
-                            hintText: 'Street, City, State',
-                            prefixIcon: const Icon(Icons.location_on_outlined, size: 20),
-                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                            contentPadding: const EdgeInsets.symmetric(vertical: 0, horizontal: 10),
-                            fillColor: Colors.white,
-                            filled: true,
-                          ),
-                          validator: (v) => (v == null || v.isEmpty) ? 'Address required' : null,
-                        ),
+                        
+                        if (userAddresses.isEmpty)
+                          Container(
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: Colors.orange.withOpacity(0.3)),
+                            ),
+                            child: Column(
+                              children: [
+                                const Icon(Icons.location_off_outlined, color: Colors.grey, size: 40),
+                                const SizedBox(height: 8),
+                                const Text("No saved addresses found.", style: TextStyle(color: Colors.grey)),
+                                const SizedBox(height: 10),
+                                SizedBox(
+                                  width: double.infinity,
+                                  child: OutlinedButton.icon(
+                                    onPressed: () {
+                                      Navigator.push(context, MaterialPageRoute(builder: (_) => const UserAddressesScreen()));
+                                    },
+                                    icon: const Icon(Icons.add),
+                                    label: const Text("Add New Address"),
+                                    style: OutlinedButton.styleFrom(
+                                      foregroundColor: Theme.of(context).primaryColor,
+                                      side: BorderSide(color: Theme.of(context).primaryColor),
+                                    ),
+                                  ),
+                                )
+                              ],
+                            ),
+                          )
+                        else
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Padding(
+                                padding: EdgeInsets.only(left: 4, bottom: 5),
+                                child: Text("Select Address", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey)),
+                              ),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(color: Colors.grey.shade300),
+                                ),
+                                child: DropdownButtonHideUnderline(
+                                  child: DropdownButton<UserAddress>(
+                                    isExpanded: true,
+                                    hint: const Text("Select Delivery Address"),
+                                    value: userAddresses.contains(_selectedUserAddress) ? _selectedUserAddress : null,
+                                    onChanged: (UserAddress? newValue) {
+                                      if (newValue != null) {
+                                        setState(() {
+                                          _selectedUserAddress = newValue;
+                                        });
+                                      }
+                                    },
+                                    items: userAddresses.map((UserAddress address) {
+                                      return DropdownMenuItem<UserAddress>(
+                                        value: address,
+                                        child: Row(
+                                          children: [
+                                            Icon(
+                                              Icons.location_on, 
+                                              size: 20, 
+                                              color: address.isDefault ? Colors.orange : Colors.grey
+                                            ),
+                                            const SizedBox(width: 10),
+                                            Expanded(
+                                              child: Column(
+                                                crossAxisAlignment: CrossAxisAlignment.start,
+                                                mainAxisAlignment: MainAxisAlignment.center,
+                                                children: [
+                                                  Text(
+                                                    address.street,
+                                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                                                    overflow: TextOverflow.ellipsis,
+                                                  ),
+                                                  Text(
+                                                    "${address.city}, ${address.state}",
+                                                    style: const TextStyle(fontSize: 12, color: Colors.grey),
+                                                    overflow: TextOverflow.ellipsis,
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      );
+                                    }).toList(),
+                                  ),
+                                ),
+                              ),
+                              Align(
+                                alignment: Alignment.centerRight,
+                                child: TextButton(
+                                  onPressed: () {
+                                    Navigator.push(context, MaterialPageRoute(builder: (_) => const UserAddressesScreen()));
+                                  },
+                                  child: const Text("Manage Addresses", style: TextStyle(fontSize: 12)),
+                                ),
+                              )
+                            ],
+                          )
                       ],
+
                       const SizedBox(height: 20),
+                      
+                      // --- SUMMARY SECTION ---
                       _buildSectionHeader('Summary'),
                       Container(
                         padding: const EdgeInsets.all(12),
@@ -262,7 +421,10 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                           ],
                         ),
                       ),
+                      
                       const SizedBox(height: 20),
+                      
+                      // --- PAYMENT SECTION ---
                       _buildSectionHeader('Payment'),
                       AccountDetailCard(
                         bankName: 'Moniepoint',
@@ -270,7 +432,10 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                         accountName: '#08Vic Enterprise',
                         onCopy: _copyToClipboard,
                       ),
+                      
                       const SizedBox(height: 20),
+                      
+                      // --- PROOF OF PAYMENT ---
                       _buildSectionHeader('Proof of Payment'),
                       GestureDetector(
                         onTap: _pickImage,
@@ -301,10 +466,17 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                         Padding(
                           padding: const EdgeInsets.only(top: 8.0),
                           child: Text(_uploadMessage!, 
-                            style: TextStyle(fontSize: 12, color: _uploadMessage!.contains('Error') || _uploadMessage!.contains('wait') ? Colors.red : Colors.green, fontWeight: FontWeight.bold)
+                            style: TextStyle(
+                              fontSize: 12, 
+                              color: _uploadMessage!.contains('Error') || _uploadMessage!.contains('wait') ? Colors.red : Colors.green, 
+                              fontWeight: FontWeight.bold
+                            )
                           ),
                         ),
+                      
                       const SizedBox(height: 25),
+                      
+                      // --- CONFIRM BUTTON ---
                       SizedBox(
                         width: double.infinity,
                         child: ElevatedButton(
@@ -332,6 +504,8 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       ),
     );
   }
+
+  // --- WIDGET HELPERS ---
 
   Widget _buildCustomHeader(BuildContext context) {
     final List<IconData> icons = [Icons.shopping_bag, Icons.shopping_cart, Icons.local_offer, Icons.credit_card, Icons.store];
@@ -604,7 +778,6 @@ class OrderSuccessScreen extends StatelessWidget {
               ),
               const SizedBox(height: 40),
               
-              // Text
               const Text(
                 'Order Completed',
                 style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.black87),
@@ -618,7 +791,6 @@ class OrderSuccessScreen extends StatelessWidget {
               
               const SizedBox(height: 50),
               
-              // Home Button
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(

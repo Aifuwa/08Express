@@ -1,4 +1,4 @@
-// lib/screens/categories_screen.dart (CORRECTED)
+// lib/screens/categories_screen.dart
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -14,12 +14,11 @@ class CategoriesScreen extends StatefulWidget {
 }
 
 class _CategoriesScreenState extends State<CategoriesScreen> {
-  // It's a good practice to trigger the initial fetch here if not already done in the provider's constructor.
-  // Although your CategoryProvider's constructor calls fetchCategories(),
-  // adding it here makes sure the data is fresh if the screen is rebuilt or navigated back to.
+  
   @override
   void initState() {
     super.initState();
+    // Fetch categories when screen loads
     WidgetsBinding.instance.addPostFrameCallback((_) {
       Provider.of<CategoryProvider>(context, listen: false).fetchCategories();
     });
@@ -28,115 +27,80 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
   @override
   Widget build(BuildContext context) {
     const Color orangeColor = Color(0xFFFE7F2D);
+    const Color backgroundColor = Color(0xFFF5F6F8);
 
     return Scaffold(
-      backgroundColor: Colors.grey[50],
+      backgroundColor: backgroundColor,
+      // Removed SafeArea to reduce top gap (assuming HomeScreen handles status bar)
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20.0, 20.0, 20.0, 10.0),
-            child: Text(
-              'Categories',
-              style: TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-                color: Colors.grey[850],
-              ),
+          // 1. Header Section (Search Removed, Padding Reduced)
+          Container(
+            padding: const EdgeInsets.fromLTRB(20, 20, 20, 15),
+            color: backgroundColor,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: const [
+                Text(
+                  'Explore',
+                  style: TextStyle(
+                    fontSize: 30,
+                    fontWeight: FontWeight.w900,
+                    color: Colors.black87,
+                    letterSpacing: -0.5,
+                    height: 1.0,
+                  ),
+                ),
+                SizedBox(height: 5),
+                Text(
+                  'Browse by category',
+                  style: TextStyle(
+                    fontSize: 16,
+                    color: Colors.grey,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
             ),
           ),
+
+          // 2. Grid Content
           Expanded(
             child: Consumer<CategoryProvider>(
               builder: (context, categoryProvider, child) {
-                // If loading AND no categories are loaded yet, show indicator
+                // --- LOADING ---
                 if (categoryProvider.isLoading && categoryProvider.categories.isEmpty) {
                   return const Center(child: CircularProgressIndicator(color: orangeColor));
                 }
 
-                // If there's an error message AND no categories are loaded
+                // --- ERROR ---
                 if (categoryProvider.errorMessage != null && categoryProvider.categories.isEmpty) {
-                  return Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text(
-                          categoryProvider.errorMessage!,
-                          style: const TextStyle(color: Colors.red),
-                          textAlign: TextAlign.center,
-                        ),
-                        const SizedBox(height: 10),
-                        ElevatedButton(
-                          onPressed: () {
-                            categoryProvider.fetchCategories(); // Retry fetching
-                          },
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: orangeColor,
-                            foregroundColor: Colors.white,
-                          ),
-                          child: const Text('Retry'),
-                        ),
-                      ],
-                    ),
-                  );
+                  return _buildErrorView(categoryProvider, orangeColor);
                 }
 
-                // If categories list is empty after loading (and no error)
+                // --- EMPTY ---
                 if (categoryProvider.categories.isEmpty) {
-                  return Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.category_outlined, size: 60, color: Colors.grey[400]),
-                        const SizedBox(height: 10),
-                        const Text(
-                          'No categories found.',
-                          style: TextStyle(fontSize: 16, color: Colors.grey),
-                        ),
-                        if (categoryProvider.errorMessage != null) // Show error message even if retry didn't work
-                          Padding(
-                            padding: const EdgeInsets.only(top: 8.0),
-                            child: Text(
-                              'Last error: ${categoryProvider.errorMessage!}',
-                              style: const TextStyle(color: Colors.redAccent, fontSize: 12),
-                              textAlign: TextAlign.center,
-                            ),
-                          ),
-                        const SizedBox(height: 10),
-                        ElevatedButton(
-                          onPressed: () {
-                            categoryProvider.fetchCategories();
-                          },
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: orangeColor,
-                            foregroundColor: Colors.white,
-                          ),
-                          child: const Text('Refresh'),
-                        ),
-                      ],
-                    ),
-                  );
+                  return _buildEmptyView(categoryProvider, orangeColor);
                 }
 
-                // Display the grid of categories
-                return Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                  child: GridView.builder(
-                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 2,
-                      crossAxisSpacing: 16.0,
-                      mainAxisSpacing: 16.0,
-                      childAspectRatio: 0.85,
-                    ),
-                    itemCount: categoryProvider.categories.length,
-                    itemBuilder: (context, index) {
-                      final category = categoryProvider.categories[index];
-                      // Filter out inactive categories if desired
-                      if (!category.active) {
-                        return const SizedBox.shrink(); // Hide inactive categories
-                      }
-                      return CategoryGridItem(category: category, accentColor: orangeColor);
-                    },
+                // Filter: Only show active categories
+                final activeCategories = categoryProvider.categories.where((c) => c.active).toList();
+
+                // --- SUCCESS GRID ---
+                return GridView.builder(
+                  padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 5.0),
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 2,
+                    crossAxisSpacing: 15.0,
+                    mainAxisSpacing: 15.0,
+                    childAspectRatio: 0.9, 
                   ),
+                  itemCount: activeCategories.length,
+                  itemBuilder: (context, index) {
+                    final category = activeCategories[index];
+                    return CategoryGridItem(category: category, accentColor: orangeColor);
+                  },
                 );
               },
             ),
@@ -145,8 +109,61 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
       ),
     );
   }
+
+  // Helper: Error View
+  Widget _buildErrorView(CategoryProvider provider, Color accentColor) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.error_outline, size: 40, color: Colors.red[300]),
+          const SizedBox(height: 10),
+          Text(
+            provider.errorMessage!,
+            style: const TextStyle(color: Colors.grey),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 15),
+          ElevatedButton(
+            onPressed: () => provider.fetchCategories(),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: accentColor,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            child: const Text('Try Again'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Helper: Empty View
+  Widget _buildEmptyView(CategoryProvider provider, Color accentColor) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.category_outlined, size: 60, color: Colors.grey[300]),
+          const SizedBox(height: 10),
+          const Text('No categories available', style: TextStyle(color: Colors.grey)),
+          const SizedBox(height: 15),
+          ElevatedButton(
+            onPressed: () => provider.fetchCategories(),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: accentColor,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            child: const Text('Refresh'),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
+// --- CATEGORY CARD (Kept the modern classy design) ---
 class CategoryGridItem extends StatelessWidget {
   final AppCategory category;
   final Color accentColor;
@@ -157,71 +174,110 @@ class CategoryGridItem extends StatelessWidget {
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: () {
-        print('Tapped on ${category.name}, navigating to products...');
         Navigator.of(context).push(
           MaterialPageRoute(
             builder: (ctx) => ProductListingScreen(
-              categoryName: category.name, // Pass the category NAME
+              categoryName: category.name,
             ),
           ),
         );
       },
-      child: Card(
-        elevation: 8,
-        shadowColor: Colors.black.withOpacity(0.1),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(18.0),
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(24.0),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.04), // Subtle premium shadow
+              offset: const Offset(0, 4),
+              blurRadius: 15,
+              spreadRadius: 2,
+            ),
+          ],
         ),
-        clipBehavior: Clip.antiAlias,
-        child: Container(
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(18.0),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(24.0),
+          child: Stack(
             children: [
-              Expanded(
-                flex: 3,
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(12.0, 12.0, 12.0, 4.0),
-                  child: category.imageUrl.isNotEmpty // Check if imageUrl is not empty
-                      ? CachedNetworkImage(
-                          imageUrl: category.imageUrl,
-                          placeholder: (context, url) => Center(
-                            child: CircularProgressIndicator(color: accentColor.withOpacity(0.7)),
-                          ),
-                          errorWidget: (context, url, error) => Center(
-                            // Show fallback icon if image fails to load
-                            child: category.icon != null
-                                ? Icon(category.icon, size: 50, color: accentColor)
-                                : const Icon(Icons.broken_image, size: 50, color: Colors.grey),
-                          ),
-                          fit: BoxFit.contain,
-                        )
-                      : Center(
-                          // Show fallback icon if imageUrl is empty
-                          child: category.icon != null
-                              ? Icon(category.icon, size: 50, color: accentColor)
-                              : const Icon(Icons.category, size: 50, color: Colors.grey), // Default category icon
-                        ),
-                ),
-              ),
-              Expanded(
-                flex: 1,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 12.0, vertical: 8.0),
-                  child: Text(
-                    category.name,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 17,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.grey[800],
-                      height: 1.2,
+              // Content Layout
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  // Image
+                  Expanded(
+                    flex: 3,
+                    child: Padding(
+                      padding: const EdgeInsets.all(16.0),
+                      child: category.imageUrl.isNotEmpty
+                          ? Hero(
+                              tag: 'catImg${category.name}',
+                              child: CachedNetworkImage(
+                                imageUrl: category.imageUrl,
+                                fit: BoxFit.contain,
+                                placeholder: (context, url) => Center(
+                                  child: CircularProgressIndicator(
+                                    color: accentColor.withOpacity(0.3),
+                                    strokeWidth: 2,
+                                  ),
+                                ),
+                                errorWidget: (context, url, error) => Icon(
+                                  category.icon ?? Icons.category,
+                                  size: 40,
+                                  color: Colors.grey[300],
+                                ),
+                              ),
+                            )
+                          : Icon(
+                              category.icon ?? Icons.category,
+                              size: 50,
+                              color: accentColor.withOpacity(0.5),
+                            ),
                     ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
+                  ),
+                  
+                  // Text
+                  Expanded(
+                    flex: 1,
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.start,
+                        children: [
+                          Text(
+                            category.name,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.black87,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+
+              // Corner Arrow Icon
+              Positioned(
+                top: 12,
+                right: 12,
+                child: Container(
+                  width: 24,
+                  height: 24,
+                  decoration: BoxDecoration(
+                    color: Colors.grey[50],
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    Icons.arrow_outward_rounded,
+                    size: 14,
+                    color: accentColor,
                   ),
                 ),
               ),

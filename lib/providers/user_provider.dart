@@ -1,12 +1,15 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_storage/firebase_storage.dart'; // Required for image upload
 import 'package:eight_express/services/auth_service.dart';
-import 'package:eight_express/models/app_user.dart'; // Make sure UserAddress is also accessible
+import 'package:eight_express/models/app_user.dart';
 
 class UserProvider with ChangeNotifier {
   final AuthService _authService = AuthService();
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final FirebaseStorage _storage = FirebaseStorage.instance; 
 
   User? _firebaseUser;
   AppUser? _appUser;
@@ -50,7 +53,7 @@ class UserProvider with ChangeNotifier {
     }
   }
 
-  // --- Authentication methods (unchanged) ---
+  // --- Authentication methods ---
   Future<User?> registerWithEmail(String email, String password) async {
     User? user = await _authService.registerWithEmailAndPassword(email, password);
     return user;
@@ -86,8 +89,49 @@ class UserProvider with ChangeNotifier {
     await _authService.signOut();
   }
 
-  // --- User Profile Update Methods (New/Updated) ---
+  // --- Password Management ---
+  Future<void> changePassword(String currentPassword, String newPassword) async {
+    if (_firebaseUser == null || _firebaseUser!.email == null) {
+      throw FirebaseAuthException(code: 'no-user', message: 'No user logged in');
+    }
 
+    // 1. Re-authenticate user (Security requirement by Firebase)
+    AuthCredential credential = EmailAuthProvider.credential(
+      email: _firebaseUser!.email!,
+      password: currentPassword,
+    );
+
+    await _firebaseUser!.reauthenticateWithCredential(credential);
+
+    // 2. Update Password
+    await _firebaseUser!.updatePassword(newPassword);
+  }
+
+  // --- Profile Image Management ---
+  Future<void> uploadProfileImage(File imageFile) async {
+    if (_firebaseUser == null) return;
+
+    try {
+      // Create a unique file name or overwrite existing one
+      String fileName = 'profile_${_firebaseUser!.uid}.jpg';
+      Reference ref = _storage.ref().child('user_profiles').child(fileName);
+
+      // Upload file
+      UploadTask uploadTask = ref.putFile(imageFile);
+      TaskSnapshot snapshot = await uploadTask;
+
+      // Get URL
+      String downloadUrl = await snapshot.ref.getDownloadURL();
+
+      // Update Firestore and Local State
+      await updateAppUserProfile(imageUrl: downloadUrl);
+    } catch (e) {
+      debugPrint("Error uploading image: $e");
+      rethrow;
+    }
+  }
+
+  // --- User Profile Update ---
   Future<void> updateAppUserProfile({String? name, String? imageUrl, String? phoneNumber}) async {
     if (_firebaseUser == null) return;
 
@@ -100,7 +144,6 @@ class UserProvider with ChangeNotifier {
       updateData['imageUrl'] = imageUrl;
       _appUser?.imageUrl = imageUrl;
     }
-    // Update phone number in Firestore (if provided and different)
     if (phoneNumber != null && phoneNumber != _appUser?.phoneNumber) {
       updateData['phoneNumber'] = phoneNumber;
       _appUser?.phoneNumber = phoneNumber;
@@ -112,18 +155,13 @@ class UserProvider with ChangeNotifier {
     }
   }
 
-  // --- Address Management Methods (New) ---
-
+  // --- Address Management ---
   Future<void> addAddress(UserAddress newAddress) async {
     if (_firebaseUser == null) return;
-
-    // Ensure only one address is default at a time
     if (newAddress.isDefault) {
       _appUser?.addresses.forEach((addr) => addr.isDefault = false);
     }
-    // Add the new address
     _appUser?.addresses.add(newAddress);
-
     await _firestore.collection('users').doc(_firebaseUser!.uid).update({
       'addresses': _appUser!.addresses.map((addr) => addr.toMap()).toList(),
     });
@@ -132,10 +170,8 @@ class UserProvider with ChangeNotifier {
 
   Future<void> updateAddress(UserAddress updatedAddress) async {
     if (_firebaseUser == null) return;
-
     int index = _appUser!.addresses.indexWhere((addr) => addr.id == updatedAddress.id);
     if (index != -1) {
-      // If the updated address is set as default, clear default from others
       if (updatedAddress.isDefault) {
         for (var i = 0; i < _appUser!.addresses.length; i++) {
           if (i != index) {
@@ -143,8 +179,7 @@ class UserProvider with ChangeNotifier {
           }
         }
       }
-      _appUser!.addresses[index] = updatedAddress; // Update the address in the list
-
+      _appUser!.addresses[index] = updatedAddress;
       await _firestore.collection('users').doc(_firebaseUser!.uid).update({
         'addresses': _appUser!.addresses.map((addr) => addr.toMap()).toList(),
       });
@@ -154,9 +189,7 @@ class UserProvider with ChangeNotifier {
 
   Future<void> deleteAddress(String addressId) async {
     if (_firebaseUser == null) return;
-
     _appUser?.addresses.removeWhere((addr) => addr.id == addressId);
-
     await _firestore.collection('users').doc(_firebaseUser!.uid).update({
       'addresses': _appUser!.addresses.map((addr) => addr.toMap()).toList(),
     });

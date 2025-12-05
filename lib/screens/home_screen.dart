@@ -1,4 +1,4 @@
-// lib/screens/home_screen.dart
+import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -31,7 +31,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   // Navigation Options
   final List<Widget> _widgetOptions = <Widget>[
-    Container(), // Placeholder for Home (Product Listing)
+    Container(), // Placeholder for Home (Product Listing) - rendered dynamically in build
     const CategoriesScreen(),
     const CartScreen(),
     const ProfileScreen(),
@@ -62,19 +62,23 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Set Status Bar to transparent to show gradient
     SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
       statusBarColor: Colors.transparent,
       statusBarIconBrightness: Brightness.light,
     ));
 
+    // Check if we are on the profile screen (Index 3)
+    bool isProfileScreen = _selectedIndex == 3;
+
     return Scaffold(
-      backgroundColor: Colors.grey[50], // Light clean background for body
+      backgroundColor: const Color(0xFFF5F6F8),
       drawer: _buildCustomDrawer(context),
       body: Column(
         children: [
-          // 1. Custom Gradient Header with Search
-          _buildGradientHeader(context),
+          // 1. Custom Gradient Header (08Express)
+          // CONDITION: Only show this header if we are NOT on the Profile Screen
+          if (!isProfileScreen) 
+            _buildGradientHeader(context),
 
           // 2. Main Content
           Expanded(
@@ -87,7 +91,7 @@ class _HomeScreenState extends State<HomeScreen> {
       bottomNavigationBar: Container(
         decoration: BoxDecoration(
           boxShadow: [
-            BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 10, offset: const Offset(0, -2))
+            BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, -2))
           ],
         ),
         child: BottomNavigationBar(
@@ -110,33 +114,38 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // --- WIDGET: Gradient Header ---
+  // --- WIDGET: Gradient Header (08Express Branding) ---
   Widget _buildGradientHeader(BuildContext context) {
-    // Icons for background pattern
     final List<IconData> icons = [Icons.shopping_bag, Icons.local_offer, Icons.card_giftcard, Icons.watch, Icons.phone_iphone];
     final Random random = Random();
+    
+    final bool isHome = _selectedIndex == 0;
 
     return Container(
-      // Height adjusts dynamically but keeps a minimum
-      padding: const EdgeInsets.fromLTRB(16, 50, 16, 20),
+      // Dynamic padding
+      padding: EdgeInsets.fromLTRB(16, 50, 16, isHome ? 20 : 15),
       decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [_darkColor, _darkColor.withOpacity(0.9), _primaryColor],
+          colors: [
+            Colors.blue.shade800, 
+            Colors.blue.shade800.withOpacity(0.9), 
+            _primaryColor 
+          ],
         ),
         borderRadius: const BorderRadius.only(
           bottomLeft: Radius.circular(30),
           bottomRight: Radius.circular(30),
         ),
         boxShadow: [
-          BoxShadow(color: _darkColor.withOpacity(0.3), blurRadius: 15, offset: const Offset(0, 5))
+          BoxShadow(color: Colors.blue.shade900.withOpacity(0.3), blurRadius: 15, offset: const Offset(0, 5))
         ],
       ),
       child: Stack(
         clipBehavior: Clip.none,
         children: [
-          // Background Pattern (Faint Icons)
+          // Background Pattern
           Positioned.fill(
             child: Opacity(
               opacity: 0.08,
@@ -158,8 +167,9 @@ class _HomeScreenState extends State<HomeScreen> {
           // Header Content
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
             children: [
-              // Top Row: Menu + Title + Cart
+              // Top Row
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -170,7 +180,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   ),
                   const Text(
-                    "Eight Express",
+                    "08Express",
                     style: TextStyle(
                       color: Colors.white,
                       fontSize: 22,
@@ -183,7 +193,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     children: [
                       IconButton(
                         icon: const Icon(Icons.shopping_cart_outlined, color: Colors.white, size: 28),
-                        onPressed: () => _onItemTapped(2),
+                        onPressed: () => _onItemTapped(2), // Go to Cart
                       ),
                       Consumer<CartProvider>(
                         builder: (_, cart, ch) => cart.itemCount > 0
@@ -211,34 +221,38 @@ class _HomeScreenState extends State<HomeScreen> {
                 ],
               ),
               
-              const SizedBox(height: 20),
-
-              // Search Bar
-              Container(
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(15),
-                  boxShadow: [
-                    BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 10, offset: const Offset(0, 5))
-                  ],
-                ),
-                child: TextField(
-                  controller: _searchController,
-                  decoration: InputDecoration(
-                    hintText: 'What are you looking for?',
-                    hintStyle: TextStyle(color: Colors.grey[400]),
-                    prefixIcon: Icon(Icons.search, color: _primaryColor),
-                    border: InputBorder.none,
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
-                    suffixIcon: _searchController.text.isNotEmpty
-                        ? IconButton(
-                            icon: const Icon(Icons.clear, color: Colors.grey),
-                            onPressed: () => _searchController.clear(),
-                          )
-                        : null,
+              // Search Bar (Only on Home)
+              if (isHome) ...[
+                const SizedBox(height: 20),
+                AnimatedGradientBorder(
+                  child: Stack(
+                    alignment: Alignment.centerLeft,
+                    children: [
+                      if (_searchController.text.isEmpty)
+                         const Padding(
+                          padding: EdgeInsets.only(left: 48.0),
+                          child: RotatingSearchHint(),
+                        ),
+                      TextField(
+                        controller: _searchController,
+                        style: const TextStyle(color: Colors.black87),
+                        decoration: InputDecoration(
+                          hintText: '', 
+                          prefixIcon: Icon(Icons.search, color: _primaryColor),
+                          border: InputBorder.none,
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
+                          suffixIcon: _searchController.text.isNotEmpty
+                              ? IconButton(
+                                  icon: const Icon(Icons.clear, color: Colors.grey),
+                                  onPressed: () => _searchController.clear(),
+                                )
+                              : null,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-              ),
+              ],
             ],
           ),
         ],
@@ -255,12 +269,13 @@ class _HomeScreenState extends State<HomeScreen> {
     final String displayInitial = safeName.isNotEmpty ? safeName[0].toUpperCase() : 'G';
     final String displayName = safeName.isNotEmpty ? safeName : 'Guest User';
     final String displayEmail = user?.email ?? 'Sign in to sync data';
+    final String? safeImage = user?.imageUrl;
 
     return Drawer(
       child: Column(
         children: [
           Container(
-            height: 200,
+            height: 220,
             width: double.infinity,
             padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
@@ -275,22 +290,37 @@ class _HomeScreenState extends State<HomeScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  CircleAvatar(
-                    radius: 30,
-                    backgroundColor: Colors.white,
-                    child: Text(
-                      displayInitial,
-                      style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: _primaryColor),
+                  Container(
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white, width: 2),
+                    ),
+                    child: CircleAvatar(
+                      radius: 35,
+                      backgroundColor: Colors.white,
+                      backgroundImage: safeImage != null && safeImage.isNotEmpty
+                          ? NetworkImage(safeImage) 
+                          : null,
+                      child: safeImage == null || safeImage.isEmpty
+                          ? Text(
+                              displayInitial,
+                              style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: _primaryColor),
+                            )
+                          : null,
                     ),
                   ),
-                  const SizedBox(height: 10),
+                  const SizedBox(height: 15),
                   Text(
                     displayName,
                     style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                   Text(
                     displayEmail,
                     style: const TextStyle(color: Colors.white70, fontSize: 12),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ],
               ),
@@ -306,7 +336,13 @@ class _HomeScreenState extends State<HomeScreen> {
                    Navigator.pop(context);
                    Navigator.push(context, MaterialPageRoute(builder: (_) => const MyOrdersScreen()));
                 }),
-                _buildDrawerItem(Icons.person_rounded, 'Profile', () { Navigator.pop(context); _onItemTapped(3); }),
+                
+                // --- NEW LIST ITEM ---
+                _buildDrawerItem(Icons.settings_suggest_rounded, 'Profile & Account Settings', () { 
+                   Navigator.pop(context); // Close Drawer
+                   _onItemTapped(3); // Switch Tab to Profile
+                }),
+                
                 const Divider(),
                 _buildDrawerItem(Icons.logout_rounded, 'Logout', () async {
                   Navigator.pop(context);
@@ -329,7 +365,71 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-// --- PRODUCT LISTING SCREEN ---
+// ... (Search Hint, Gradient Border, Product Listing classes remain same as previous) ...
+class RotatingSearchHint extends StatefulWidget {
+  const RotatingSearchHint({Key? key}) : super(key: key);
+  @override
+  State<RotatingSearchHint> createState() => _RotatingSearchHintState();
+}
+
+class _RotatingSearchHintState extends State<RotatingSearchHint> {
+  final List<String> _searchSuggestions = ["Search for 'Indomie'", "Search for 'NAN'", "Search for 'Maggi'", "Search for 'PRE NAN'", "Search for 'Diapers'", "Search for 'Milk'"];
+  int _currentIndex = 0;
+  Timer? _timer;
+  @override
+  void initState() { super.initState(); _startRotation(); }
+  void _startRotation() { _timer = Timer.periodic(const Duration(seconds: 3), (timer) { if (mounted) { setState(() { _currentIndex = (_currentIndex + 1) % _searchSuggestions.length; }); } }); }
+  @override
+  void dispose() { _timer?.cancel(); super.dispose(); }
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 500),
+      transitionBuilder: (child, anim) => FadeTransition(opacity: anim, child: SlideTransition(position: Tween<Offset>(begin: const Offset(0.0, 0.5), end: Offset.zero).animate(anim), child: child)),
+      child: Text(_searchSuggestions[_currentIndex], key: ValueKey<String>(_searchSuggestions[_currentIndex]), style: TextStyle(color: Colors.grey[400], fontSize: 16)),
+    );
+  }
+}
+
+class AnimatedGradientBorder extends StatefulWidget {
+  final Widget child;
+  const AnimatedGradientBorder({super.key, required this.child});
+  @override
+  State<AnimatedGradientBorder> createState() => _AnimatedGradientBorderState();
+}
+
+class _AnimatedGradientBorderState extends State<AnimatedGradientBorder> with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  @override
+  void initState() { super.initState(); _controller = AnimationController(duration: const Duration(seconds: 3), vsync: this)..repeat(); }
+  @override
+  void dispose() { _controller.dispose(); super.dispose(); }
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (_, __) {
+        return Container(
+          padding: const EdgeInsets.all(2.5), 
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(15),
+            gradient: SweepGradient(
+              colors: const [Color(0xFFFE7F2D), Colors.purpleAccent, Colors.cyanAccent, Color(0xFFFE7F2D)],
+              stops: const [0.0, 0.45, 0.75, 1.0],
+              transform: GradientRotation(_controller.value * 2 * pi),
+            ),
+            boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.15), blurRadius: 10, offset: const Offset(0, 5))],
+          ),
+          child: Container(
+            decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(13)),
+            child: widget.child,
+          ),
+        );
+      },
+    );
+  }
+}
+
 class ProductListingScreen extends StatelessWidget {
   final String searchQuery;
   const ProductListingScreen({super.key, this.searchQuery = ''});
@@ -379,7 +479,7 @@ class ProductListingScreen extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                 gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                   crossAxisCount: 2,
-                  childAspectRatio: 0.70,
+                  childAspectRatio: 0.65, 
                   crossAxisSpacing: 16,
                   mainAxisSpacing: 16,
                 ),
@@ -394,14 +494,14 @@ class ProductListingScreen extends StatelessWidget {
   }
 }
 
-// --- REDESIGNED PRODUCT ITEM WITH QUANTITY CONTROLS ---
 class ProductGridItem extends StatelessWidget {
   final Product product;
   const ProductGridItem({super.key, required this.product});
 
   @override
   Widget build(BuildContext context) {
-    // We used to simple return a container. Now we listen to CartProvider.
+    const Color orangeColor = Color(0xFFFE7F2D);
+
     return GestureDetector(
       onTap: () {
         Navigator.of(context).push(MaterialPageRoute(builder: (ctx) => ProductDetailScreen(product: product)));
@@ -411,13 +511,17 @@ class ProductGridItem extends StatelessWidget {
           color: Colors.white,
           borderRadius: BorderRadius.circular(20),
           boxShadow: [
-            BoxShadow(color: Colors.grey.withOpacity(0.1), spreadRadius: 1, blurRadius: 10, offset: const Offset(0, 4)),
+            BoxShadow(
+              color: Colors.grey.withOpacity(0.15), 
+              spreadRadius: 2, 
+              blurRadius: 15, 
+              offset: const Offset(0, 5)
+            ),
           ],
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Image Section
             Expanded(
               child: Stack(
                 children: [
@@ -430,24 +534,22 @@ class ProductGridItem extends StatelessWidget {
                         fit: BoxFit.cover,
                         width: double.infinity,
                         height: double.infinity,
-                        errorBuilder: (c, e, s) => Container(color: Colors.grey[200], child: const Center(child: Icon(Icons.broken_image, color: Colors.grey))),
+                        errorBuilder: (c, e, s) => Container(color: Colors.grey[100], child: const Center(child: Icon(Icons.broken_image, color: Colors.grey))),
                       ),
                     ),
                   ),
                   Positioned(
-                    top: 8,
-                    right: 8,
+                    top: 10,
+                    right: 10,
                     child: Container(
                       padding: const EdgeInsets.all(6),
-                      decoration: BoxDecoration(color: Colors.white.withOpacity(0.8), shape: BoxShape.circle),
+                      decoration: BoxDecoration(color: Colors.white.withOpacity(0.9), shape: BoxShape.circle),
                       child: const Icon(Icons.favorite_border, size: 18, color: Colors.grey),
                     ),
                   ),
                 ],
               ),
             ),
-            
-            // Details Section
             Padding(
               padding: const EdgeInsets.all(12.0),
               child: Column(
@@ -459,98 +561,65 @@ class ProductGridItem extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
-                  const SizedBox(height: 4),
-                  Row(
-                    children: [
-                      Text(
-                        '\₦${product.price.toStringAsFixed(2)}',
-                        style: const TextStyle(
-                          color: Color(0xFFFE7F2D), // Orange
-                          fontSize: 15,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                    ],
+                  const SizedBox(height: 6),
+                  Text(
+                    '\₦${product.price.toStringAsFixed(2)}',
+                    style: const TextStyle(
+                      color: orangeColor,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w900,
+                    ),
                   ),
                   const SizedBox(height: 10),
-                  
-                  // --- SMART CART BUTTON AREA ---
-                  SizedBox(
-                    width: double.infinity,
-                    height: 35,
-                    child: Consumer<CartProvider>(
-                      builder: (context, cart, child) {
-                        // Check if item is in cart
-                        final isInCart = cart.items.containsKey(product.id);
-                        final quantity = isInCart ? cart.items[product.id]!.quantity : 0;
-
-                        if (!isInCart) {
-                          // STATE 1: Not in cart -> Show "ADD" button
-                          return ElevatedButton(
-                            onPressed: () {
-                              cart.addItem(product);
-                              ScaffoldMessenger.of(context).hideCurrentSnackBar();
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: const Text('Added to cart!'),
-                                  duration: const Duration(milliseconds: 800),
-                                  behavior: SnackBarBehavior.floating,
-                                  backgroundColor: const Color(0xFFFE7F2D),
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                ),
-                              );
-                            },
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color.fromRGBO(57, 64, 83, 1),
-                              foregroundColor: Colors.white,
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                              padding: EdgeInsets.zero,
-                              elevation: 0,
-                            ),
-                            child: const Text('ADD', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                          );
-                        } else {
-                          // STATE 2: In cart -> Show [- Qty +] controls
-                          return Container(
-                            decoration: BoxDecoration(
-                              color: const Color.fromRGBO(57, 64, 83, 1), // Dark Blue
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                // Decrease Button
-                                Expanded(
-                                  child: IconButton(
-                                    onPressed: () {
-                                      cart.removeSingleItem(product.id);
-                                    },
-                                    icon: const Icon(Icons.remove, color: Colors.white, size: 16),
-                                    padding: EdgeInsets.zero,
-                                    constraints: const BoxConstraints(),
-                                  ),
-                                ),
-                                // Quantity Text
-                                Text(
-                                  '$quantity',
-                                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
-                                ),
-                                // Increase Button
-                                Expanded(
-                                  child: IconButton(
-                                    onPressed: () {
-                                      cart.addItem(product);
-                                    },
-                                    icon: const Icon(Icons.add, color: Colors.white, size: 16),
-                                    padding: EdgeInsets.zero,
-                                    constraints: const BoxConstraints(),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          );
-                        }
-                      },
+                  InkWell(
+                    onTap: () {
+                      Provider.of<CartProvider>(context, listen: false).addItem(product);
+                      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: const Text('Added to cart!'),
+                          behavior: SnackBarBehavior.floating,
+                          backgroundColor: Colors.green,
+                          duration: const Duration(milliseconds: 1000),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
+                      );
+                    },
+                    borderRadius: BorderRadius.circular(25),
+                    child: Container(
+                      height: 40,
+                      width: double.infinity,
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [Color(0xFFFE7F2D), Color(0xFFFFB347)], 
+                          begin: Alignment.centerLeft,
+                          end: Alignment.centerRight,
+                        ),
+                        borderRadius: BorderRadius.circular(25),
+                        boxShadow: [
+                          BoxShadow(
+                            color: const Color(0xFFFE7F2D).withOpacity(0.4),
+                            blurRadius: 8,
+                            offset: const Offset(0, 4),
+                          )
+                        ],
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: const [
+                          Icon(Icons.add_shopping_cart_rounded, color: Colors.white, size: 18),
+                          SizedBox(width: 8),
+                          Text(
+                            'ADD', 
+                            style: TextStyle(
+                              fontSize: 13, 
+                              fontWeight: FontWeight.bold, 
+                              color: Colors.white,
+                              letterSpacing: 0.5
+                            )
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ],

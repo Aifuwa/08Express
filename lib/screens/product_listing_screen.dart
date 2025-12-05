@@ -1,13 +1,14 @@
 // lib/screens/product_listing_screen.dart
+import 'dart:ui'; // Required for ImageFilter (Glassmorphism)
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:eight_express/models/product.dart'; // Import your Product model
-import 'package:eight_express/providers/product_provider.dart'; // Import your ProductProvider
-import 'package:eight_express/screens/product_detail_screen.dart'; // Import your ProductDetailScreen
+import 'package:eight_express/models/product.dart';
+import 'package:eight_express/providers/product_provider.dart';
+import 'package:eight_express/providers/cart_provider.dart';
+import 'package:eight_express/screens/product_detail_screen.dart';
 
 class ProductListingScreen extends StatefulWidget {
-  // This screen now expects a categoryName to filter products
   final String categoryName;
 
   const ProductListingScreen({
@@ -23,8 +24,6 @@ class _ProductListingScreenState extends State<ProductListingScreen> {
   @override
   void initState() {
     super.initState();
-    // Fetch products specifically for this category when the screen initializes
-    // Using addPostFrameCallback to ensure context is fully built
     WidgetsBinding.instance.addPostFrameCallback((_) {
       Provider.of<ProductProvider>(context, listen: false)
           .fetchProducts(categoryName: widget.categoryName);
@@ -33,13 +32,21 @@ class _ProductListingScreenState extends State<ProductListingScreen> {
 
   @override
   Widget build(BuildContext context) {
-    const Color orangeColor = Color(0xFFFE7F2D); // Consistent accent color
+    const Color orangeColor = Color(0xFFFE7F2D);
+    // Light background color for contrast against white cards
+    const Color backgroundColor = Color(0xFFF5F6F8); 
 
     return Scaffold(
+      backgroundColor: backgroundColor,
       appBar: AppBar(
-        title: Text('${widget.categoryName} Products'), // Display the category name
-        backgroundColor: orangeColor,
-        foregroundColor: Colors.white,
+        title: Text(
+          '${widget.categoryName}',
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
+        backgroundColor: Colors.white,
+        foregroundColor: Colors.black87,
+        elevation: 0,
+        centerTitle: true,
       ),
       body: Consumer<ProductProvider>(
         builder: (context, productProvider, child) {
@@ -51,26 +58,29 @@ class _ProductListingScreenState extends State<ProductListingScreen> {
 
           if (productProvider.errorMessage != null) {
             return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    productProvider.errorMessage!,
-                    style: const TextStyle(color: Colors.red),
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 10),
-                  ElevatedButton(
-                    onPressed: () {
-                      productProvider.fetchProducts(categoryName: widget.categoryName); // Retry fetch
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: orangeColor,
-                      foregroundColor: Colors.white,
+              child: Padding(
+                padding: const EdgeInsets.all(20.0),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      productProvider.errorMessage!,
+                      style: const TextStyle(color: Colors.red),
+                      textAlign: TextAlign.center,
                     ),
-                    child: const Text('Retry'),
-                  ),
-                ],
+                    const SizedBox(height: 10),
+                    ElevatedButton(
+                      onPressed: () {
+                        productProvider.fetchProducts(categoryName: widget.categoryName);
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: orangeColor,
+                        foregroundColor: Colors.white,
+                      ),
+                      child: const Text('Retry'),
+                    ),
+                  ],
+                ),
               ),
             );
           }
@@ -80,30 +90,30 @@ class _ProductListingScreenState extends State<ProductListingScreen> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.sentiment_dissatisfied, size: 60, color: Colors.grey[400]),
-                  const SizedBox(height: 10),
-                  const Text(
-                    'No products found in this category.',
-                    style: TextStyle(fontSize: 16, color: Colors.grey),
+                  Icon(Icons.search_off, size: 80, color: Colors.grey[300]),
+                  const SizedBox(height: 15),
+                  Text(
+                    'No items in ${widget.categoryName}',
+                    style: TextStyle(fontSize: 18, color: Colors.grey[500], fontWeight: FontWeight.w500),
                   ),
                 ],
               ),
             );
           }
 
-          // Display products in a grid
           return GridView.builder(
-            padding: const EdgeInsets.all(16.0),
+            padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 20.0),
             gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 2, // Two items per row
+              crossAxisCount: 2,
               crossAxisSpacing: 16.0,
-              mainAxisSpacing: 16.0,
-              childAspectRatio: 0.7, // Adjust ratio for better product card display
+              mainAxisSpacing: 20.0,
+              // Optimized Aspect Ratio to prevent overflow and look taller/modern
+              childAspectRatio: 0.65, 
             ),
             itemCount: productProvider.products.length,
             itemBuilder: (context, index) {
               final product = productProvider.products[index];
-              return ProductGridItem(product: product, accentColor: orangeColor);
+              return ProductGridItem(product: product);
             },
           );
         },
@@ -112,86 +122,201 @@ class _ProductListingScreenState extends State<ProductListingScreen> {
   }
 }
 
-// Widget for a single product item in the grid
 class ProductGridItem extends StatelessWidget {
   final Product product;
-  final Color accentColor;
 
-  const ProductGridItem({Key? key, required this.product, required this.accentColor}) : super(key: key);
+  const ProductGridItem({Key? key, required this.product}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
+    const Color orangeColor = Color(0xFFFE7F2D);
+    final bool isOutOfStock = product.stock <= 0;
+
     return GestureDetector(
       onTap: () {
-        print('Tapped on product: ${product.name}');
-        // Navigate to the ProductDetailScreen, passing the entire product object
         Navigator.of(context).push(
           MaterialPageRoute(
             builder: (ctx) => ProductDetailScreen(product: product),
           ),
         );
       },
-      child: Card(
-        elevation: 6,
-        shadowColor: Colors.black.withOpacity(0.1),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(15.0),
+      child: Container(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.06), // Soft, premium shadow
+              spreadRadius: 1,
+              blurRadius: 15,
+              offset: const Offset(0, 8),
+            ),
+          ],
         ),
-        clipBehavior: Clip.antiAlias,
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // 1. IMAGE SECTION
             Expanded(
-              flex: 3,
-              child: Hero( // Added Hero widget for product image transition
-                tag: 'productImage${product.id}', // Unique tag for Hero animation
-                child: CachedNetworkImage(
-                  imageUrl: product.imageUrl,
-                  placeholder: (context, url) => Center(
-                    child: CircularProgressIndicator(color: accentColor.withOpacity(0.7)),
+              flex: 5,
+              child: Stack(
+                children: [
+                  // Product Image
+                  ClipRRect(
+                    borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+                    child: Hero(
+                      tag: 'productImage${product.id}',
+                      child: CachedNetworkImage(
+                        imageUrl: product.imageUrl,
+                        width: double.infinity,
+                        height: double.infinity,
+                        fit: BoxFit.cover,
+                        placeholder: (context, url) => Center(
+                          child: CircularProgressIndicator(color: orangeColor.withOpacity(0.3)),
+                        ),
+                        errorWidget: (context, url, error) => Container(
+                          color: Colors.grey[50],
+                          child: const Icon(Icons.broken_image, size: 40, color: Colors.grey),
+                        ),
+                      ),
+                    ),
                   ),
-                  errorWidget: (context, url, error) => Container(
-                    color: Colors.grey[200],
-                    child: Icon(Icons.broken_image, size: 50, color: Colors.grey[400]),
+
+                  // Glassmorphism Wishlist Button (Top Right)
+                  Positioned(
+                    top: 10,
+                    right: 10,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(30),
+                      child: BackdropFilter(
+                        filter: ImageFilter.blur(sigmaX: 5.0, sigmaY: 5.0),
+                        child: Container(
+                          width: 32,
+                          height: 32,
+                          decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.6),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.favorite_border, size: 18, color: Colors.black54),
+                        ),
+                      ),
+                    ),
                   ),
-                  fit: BoxFit.cover,
-                ),
+
+                  // Out of Stock Overlay
+                  if (isOutOfStock)
+                    Container(
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.85),
+                        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+                      ),
+                      child: const Center(
+                        child: Text(
+                          "SOLD OUT",
+                          style: TextStyle(
+                            color: Colors.red, 
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 1.0,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
               ),
             ),
+            
+            // 2. DETAILS SECTION
             Expanded(
-              flex: 2,
+              flex: 3,
               child: Padding(
-                padding: const EdgeInsets.all(8.0),
-                // --- FIX START ---
-                child: SingleChildScrollView( // Wrap the inner Column with SingleChildScrollView
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        product.name,
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.grey[850],
-                        ),
-                        maxLines: 2, // Keep maxLines for visual control, but scrolling handles overflow
-                        overflow: TextOverflow.ellipsis,
+                padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    // Title
+                    Text(
+                      product.name,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.black87,
+                        height: 1.2,
                       ),
-                      const SizedBox(height: 4),
-                      Text(
-                        '\₦${product.price.toStringAsFixed(2)}', // Using Naira symbol
-                        style: TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.bold,
-                          color: accentColor,
+                      maxLines: 2, 
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    
+                    // Price & Gradient Add Button
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        // Price
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Price',
+                              style: TextStyle(fontSize: 10, color: Colors.grey),
+                            ),
+                            Text(
+                              '\₦${product.price.toStringAsFixed(0)}', // Rounded for cleaner look
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w900,
+                                color: orangeColor,
+                              ),
+                            ),
+                          ],
                         ),
-                      ),
-                      const SizedBox(height: 4),
-                      // You can add more product details here if needed, like rating or stock info
-                    ],
-                  ),
+                        
+                        // Gradient Add Button
+                        GestureDetector(
+                          onTap: !isOutOfStock
+                              ? () {
+                                  Provider.of<CartProvider>(context, listen: false)
+                                      .addItem(product, quantity: 1);
+                                  
+                                  ScaffoldMessenger.of(context).hideCurrentSnackBar();
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text('${product.name} added!'),
+                                      duration: const Duration(milliseconds: 1000),
+                                      behavior: SnackBarBehavior.floating,
+                                      backgroundColor: Colors.green,
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                    ),
+                                  );
+                                }
+                              : null,
+                          child: Container(
+                            width: 36,
+                            height: 36,
+                            decoration: BoxDecoration(
+                              gradient: !isOutOfStock 
+                                ? const LinearGradient(
+                                    colors: [Color(0xFFFE7F2D), Color(0xFFFFB347)],
+                                    begin: Alignment.topLeft,
+                                    end: Alignment.bottomRight,
+                                  )
+                                : const LinearGradient(colors: [Colors.grey, Colors.grey]),
+                              shape: BoxShape.circle,
+                              boxShadow: [
+                                BoxShadow(
+                                  color: orangeColor.withOpacity(0.4),
+                                  blurRadius: 8,
+                                  offset: const Offset(0, 4),
+                                )
+                              ],
+                            ),
+                            child: const Icon(Icons.add, color: Colors.white, size: 20),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
-                // --- FIX END ---
               ),
             ),
           ],
