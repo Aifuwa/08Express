@@ -1,3 +1,4 @@
+import 'package:eight_express/widgets/custom_loader.dart';
 import 'package:flutter/material.dart';
 import 'dart:io'; // For File operations
 import 'package:image_picker/image_picker.dart'; // For picking images
@@ -280,9 +281,8 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                   ? const SizedBox(
                       width: 20,
                       height: 20,
-                      child: CircularProgressIndicator(
-                        color: Colors.white,
-                        strokeWidth: 2,
+                      child: CustomLoader(
+                        size: 30,
                       ),
                     )
                   : const Icon(Icons.payment),

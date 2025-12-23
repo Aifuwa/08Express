@@ -1,10 +1,11 @@
 // lib/providers/product_provider.dart
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:eight_express/models/product.dart'; // Import your Product model
+import 'package:eight_express/models/product.dart';
 
 class ProductProvider with ChangeNotifier {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  
   List<Product> _products = [];
   bool _isLoading = false;
   String? _errorMessage;
@@ -13,14 +14,12 @@ class ProductProvider with ChangeNotifier {
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
 
-  // No initial fetch here unless you want ALL products on app start
-  // ProductProvider() {
-  //   fetchProducts();
-  // }
-
+  // --- FETCH ALL PRODUCTS (OR BY CATEGORY) ---
   Future<void> fetchProducts({String? categoryName}) async {
     _isLoading = true;
     _errorMessage = null;
+    // We don't notifyListeners here immediately to avoid unnecessary rebuilds 
+    // before the async operation starts, but we do it if UI needs to show loader.
     notifyListeners();
 
     try {
@@ -34,17 +33,44 @@ class ProductProvider with ChangeNotifier {
       _products = querySnapshot.docs
           .map((doc) => Product.fromFirestore(doc))
           .toList();
+          
+      _errorMessage = null;
     } on FirebaseException catch (e) {
       _errorMessage = 'Failed to load products: ${e.message}';
-      print('Firestore Error (fetchProducts): ${e.code} - ${e.message}');
+      debugPrint('Firestore Error: ${e.code} - ${e.message}');
     } catch (e) {
-      _errorMessage = 'An unexpected error occurred: $e';
-      print('General Error (fetchProducts): $e');
+      _errorMessage = 'An unexpected error occurred';
+      debugPrint('General Error: $e');
     } finally {
       _isLoading = false;
       notifyListeners();
     }
   }
 
-  // You can add methods for adding, updating, deleting products if needed
+  // --- NEW: FETCH SINGLE PRODUCT BY ID ---
+  // Useful for Notifications and Deep Links
+  Future<Product?> fetchProductById(String productId) async {
+    _isLoading = true;
+    notifyListeners();
+    
+    try {
+      DocumentSnapshot doc = await _firestore.collection('products').doc(productId).get();
+      if (doc.exists) {
+        return Product.fromFirestore(doc);
+      }
+      return null;
+    } catch (e) {
+      debugPrint("Error fetching product by ID: $e");
+      return null;
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  // --- HELPER: CLEAR ERRORS ---
+  void clearErrors() {
+    _errorMessage = null;
+    notifyListeners();
+  }
 }

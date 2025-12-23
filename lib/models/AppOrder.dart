@@ -1,6 +1,7 @@
-// lib/models/AppOrder.dart
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:eight_express/providers/cart_provider.dart';
+// REMOVED: import 'package:eight_express/providers/cart_provider.dart'; 
+// ADDED: Import the explicit model file
+import 'package:eight_express/models/cart_item.dart'; 
 
 class AppOrder {
   final String id;
@@ -8,7 +9,7 @@ class AppOrder {
   final double totalAmount;
   final double deliveryFee;
   final String shippingAddress;
-  final String deliveryMethod; // Added this field
+  final String deliveryMethod; 
   final List<OrderItem> items;
   final Timestamp orderDate;
   final String status;
@@ -20,7 +21,7 @@ class AppOrder {
     required this.totalAmount,
     required this.deliveryFee,
     required this.shippingAddress,
-    required this.deliveryMethod, // Required in constructor
+    required this.deliveryMethod, 
     required this.items,
     required this.orderDate,
     this.status = 'pending',
@@ -35,7 +36,6 @@ class AppOrder {
     }
 
     List<OrderItem> orderItems = [];
-    // Check for 'orderItems' first, fallback to 'items' just in case
     if (data['orderItems'] is List) {
       orderItems = (data['orderItems'] as List)
           .map((itemMap) => OrderItem.fromMap(itemMap as Map<String, dynamic>))
@@ -48,7 +48,6 @@ class AppOrder {
       totalAmount: (data['totalAmount'] as num?)?.toDouble() ?? 0.0,
       deliveryFee: (data['deliveryFee'] as num?)?.toDouble() ?? 0.0,
       shippingAddress: data['shippingAddress'] as String? ?? 'No Address',
-      // Parse deliveryMethod, default to 'delivery' if missing
       deliveryMethod: data['deliveryMethod'] as String? ?? 'delivery', 
       items: orderItems,
       orderDate: data['orderDate'] as Timestamp? ?? Timestamp.now(),
@@ -63,7 +62,7 @@ class AppOrder {
       'totalAmount': totalAmount,
       'deliveryFee': deliveryFee,
       'shippingAddress': shippingAddress,
-      'deliveryMethod': deliveryMethod, // Save to Firestore
+      'deliveryMethod': deliveryMethod, 
       'orderItems': items.map((item) => item.toMap()).toList(),
       'orderDate': orderDate,
       'status': status,
@@ -87,6 +86,7 @@ class OrderItem {
     required this.quantity,
   });
 
+  // Now relies on the imported CartItem model
   factory OrderItem.fromCartItem(CartItem cartItem) {
     return OrderItem(
       productId: cartItem.productId,

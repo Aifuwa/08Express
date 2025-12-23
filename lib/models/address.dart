@@ -19,7 +19,7 @@ class Address {
     required this.country,
     this.isDefault = false,
   });
-
+   
   // Factory constructor to create Address from a Map (e.g., from Firestore)
   factory Address.fromMap(Map<String, dynamic> data, {String? docId}) {
     return Address(
@@ -32,6 +32,7 @@ class Address {
       isDefault: data['isDefault'] as bool? ?? false,
     );
   }
+
 
   // Method to convert Address to a Map for Firestore storage
   Map<String, dynamic> toMap() {

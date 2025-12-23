@@ -1,4 +1,9 @@
+import 'dart:async';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:eight_express/screens/home_screen.dart';
+import 'package:eight_express/screens/auth_screen.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -7,120 +12,102 @@ class SplashScreen extends StatefulWidget {
   State<SplashScreen> createState() => _SplashScreenState();
 }
 
-class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-  late Animation<double> _logoScaleAnimation;
-  late Animation<double> _logoFadeAnimation;
-  late Animation<double> _orangeBloomScaleAnimation; // For the orange bloom effect
-  late Animation<double> _orangeBloomFadeAnimation; // For the orange bloom fade
+class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMixin {
+  late AnimationController _mainController;
+  late AnimationController _rotationController;
+  late Animation<double> _logoScale;
+  late Animation<double> _logoOpacity;
 
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(
-      duration: const Duration(seconds: 2, milliseconds: 500), // Total animation duration (2.5 seconds)
-      vsync: this,
-    );
 
-    // Logo appears and slightly scales up
-    _logoScaleAnimation = Tween<double>(begin: 0.7, end: 1.0).animate(
-      CurvedAnimation(
-        parent: _controller,
-        curve: const Interval(0.0, 0.5, curve: Curves.easeOutCubic), // Logo scales up during first half
-      ),
-    );
+    _mainController = AnimationController(vsync: this, duration: const Duration(milliseconds: 1500));
+    _rotationController = AnimationController(vsync: this, duration: const Duration(seconds: 2))..repeat();
 
-    _logoFadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(
-        parent: _controller,
-        curve: const Interval(0.0, 0.3, curve: Curves.easeIn), // Logo fades in quickly
-      ),
-    );
+    _logoScale = Tween<double>(begin: 0.5, end: 1.0).animate(CurvedAnimation(parent: _mainController, curve: Curves.elasticOut));
+    _logoOpacity = Tween<double>(begin: 0.0, end: 1.0).animate(CurvedAnimation(parent: _mainController, curve: const Interval(0.0, 0.5, curve: Curves.easeIn)));
 
-    // Orange bloom effect
-    _orangeBloomScaleAnimation = Tween<double>(begin: 0.0, end: 1.2).animate( // Scales from 0 to slightly larger than container
-      CurvedAnimation(
-        parent: _controller,
-        curve: const Interval(0.3, 0.8, curve: Curves.easeOut), // Bloom starts after logo appears, peaks, then recedes
-      ),
-    );
+    _mainController.forward();
 
-    _orangeBloomFadeAnimation = Tween<double>(begin: 0.0, end: 0.7).animate( // Fades in and out
-      CurvedAnimation(
-        parent: _controller,
-        curve: const Interval(0.3, 0.9, curve: Curves.easeInOut), // Bloom fades in, then fades out
-      ),
-    );
+    // Fast but smooth transition (2.5 seconds total)
+    Timer(const Duration(milliseconds: 2500), () => _navigate());
+  }
 
-    // Start the animation
-    _controller.forward(); // We no longer add .then((_) {...}) here
+  void _navigate() {
+    if (!mounted) return;
+    User? user = FirebaseAuth.instance.currentUser;
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute(builder: (_) => user != null ? const HomeScreen() : const AuthScreen()),
+    );
   }
 
   @override
   void dispose() {
-    _controller.dispose();
+    _mainController.dispose();
+    _rotationController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    const Color primaryOrange = Color(0xFFF97125); // Your brand orange
-    const Color backgroundColor = Colors.white; // Option 1: Pure white
-
     return Scaffold(
-      backgroundColor: backgroundColor,
-      body: Center(
-        child: AnimatedBuilder(
-          animation: _controller,
-          builder: (context, child) {
-            return Stack(
-              alignment: Alignment.center,
+      backgroundColor: Colors.white,
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          // 1. Orbit Center
+          Center(
+            child: AnimatedBuilder(
+              animation: _rotationController,
+              builder: (context, child) => Transform.rotate(
+                angle: _rotationController.value * 2 * math.pi,
+                child: CustomPaint(
+                  size: const Size(200, 200), 
+                  painter: _OrbitPainter(color: const Color(0xFFFE7F2D).withOpacity(0.3)),
+                ),
+              ),
+            ),
+          ),
+          // 2. Logo Center
+          Center(
+            child: ScaleTransition(
+              scale: _logoScale,
+              child: FadeTransition(
+                opacity: _logoOpacity,
+                child: Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle, boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 20)]),
+                  child: Image.asset('assets/logo.png', width: 100, height: 100),
+                ),
+              ),
+            ),
+          ),
+          // 3. Footer
+          Positioned(
+            bottom: 60, left: 0, right: 0,
+            child: Column(
               children: [
-                // The orange bloom effect
-                Opacity(
-                  opacity: _orangeBloomFadeAnimation.value,
-                  child: Transform.scale(
-                    scale: _orangeBloomScaleAnimation.value,
-                    child: Container(
-                      width: 250, // Max size for the bloom effect
-                      height: 250,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(
-                            color: primaryOrange.withOpacity(0.4), // Softer orange glow
-                            blurRadius: 50.0,
-                            spreadRadius: 20.0,
-                          ),
-                          BoxShadow(
-                            color: primaryOrange.withOpacity(0.2), // Even softer outer glow
-                            blurRadius: 80.0,
-                            spreadRadius: 40.0,
-                          ),
-                        ],
-                        color: primaryOrange.withOpacity(0.0), // Invisible core, just relies on shadows
-                      ),
-                    ),
-                  ),
-                ),
-                // Your logo
-                Opacity(
-                  opacity: _logoFadeAnimation.value,
-                  child: Transform.scale(
-                    scale: _logoScaleAnimation.value,
-                    child: Image.asset(
-                      'assets/logo.png', // Your specified logo path (relative to project root)
-                      width: 150, // Adjust size as needed
-                      height: 150, // Adjust size as needed
-                      fit: BoxFit.contain,
-                    ),
-                  ),
-                ),
+                const Text("08Express", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, letterSpacing: 2)),
+                Text("by 08Vic Enterprises © 2025", style: TextStyle(fontSize: 12, color: Colors.grey.shade400)),
               ],
-            );
-          },
-        ),
+            ),
+          ),
+        ],
       ),
     );
   }
+}
+
+class _OrbitPainter extends CustomPainter {
+  final Color color;
+  _OrbitPainter({required this.color});
+  @override
+  void paint(Canvas canvas, Size size) {
+    Paint p = Paint()..color = color..strokeWidth = 3..style = PaintingStyle.stroke..strokeCap = StrokeCap.round;
+    canvas.drawArc(Rect.fromLTWH(0, 0, size.width, size.height), 0, math.pi, false, p);
+    canvas.drawArc(Rect.fromLTWH(0, 0, size.width, size.height), math.pi, math.pi/4, false, p);
+  }
+  @override
+  bool shouldRepaint(CustomPainter old) => false;
 }

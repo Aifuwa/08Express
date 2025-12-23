@@ -51,6 +51,7 @@ dependencies:
   cloud_functions: ^6.0.4
   flutter_local_notifications: ^19.5.0
   firebase_remote_config: ^6.1.2
+  flutter_native_splash: ^2.4.7
 
 
   
@@ -71,7 +72,7 @@ dev_dependencies:
 flutter_launcher_icons:
       android: "launcher_icon" # Set to true to generate for Android, or a specific name
       ios: true # Set to true to generate for iOS
-      image_path: "assets/08express Logo.png" # Path to your icon image
+      image_path: "assets/logo.png" # Path to your icon image
       # Optional: For Android adaptive icons
       # adaptive_icon_foreground: "assets/icon/foreground.png"
       # adaptive_icon_background: "assets/icon/background.png"# For information on the generic Dart part of this file, see the
@@ -121,3 +122,10 @@ flutter:
   #
   # For details regarding fonts from package dependencies,
   # see https://flutter.dev/to/font-from-package
+
+flutter_native_splash:
+  color: "#ffffff" # Or your orange color #FE7F2D
+  #mage: assets/logo.png
+  android_12:
+    #image: assets/logo.png
+    color: "#ffffff"

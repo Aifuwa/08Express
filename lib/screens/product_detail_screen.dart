@@ -1,10 +1,9 @@
-// lib/screens/product_detail_screen.dart
-import 'dart:ui'; // Required for ImageFilter
+import 'dart:ui'; 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:eight_express/models/product.dart';
 import 'package:eight_express/providers/cart_provider.dart';
-import 'package:eight_express/screens/cart_screen.dart'; // Import CartScreen
+import 'package:eight_express/screens/cart_screen.dart'; 
 
 class ProductDetailScreen extends StatefulWidget {
   final Product product;
@@ -18,19 +17,60 @@ class ProductDetailScreen extends StatefulWidget {
 class _ProductDetailScreenState extends State<ProductDetailScreen> {
   int _quantity = 1;
 
-  // Function to increase quantity (Unlimited)
   void _increaseQuantity() {
     setState(() {
       _quantity++;
     });
   }
 
-  // Function to decrease quantity
   void _decreaseQuantity() {
     if (_quantity > 1) {
       setState(() {
         _quantity--;
       });
+    }
+  }
+
+  // --- NEW: Manual Input Dialog ---
+  Future<void> _showManualQuantityDialog() async {
+    TextEditingController qtyController = TextEditingController(text: _quantity.toString());
+    
+    String? result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Set Quantity'),
+        content: TextField(
+          controller: qtyController,
+          keyboardType: TextInputType.number,
+          autofocus: true,
+          decoration: const InputDecoration(
+            hintText: 'Quantity',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, qtyController.text),
+            child: const Text('Set', style: TextStyle(color: Color(0xFFFE7F2D))),
+          ),
+        ],
+      ),
+    );
+
+    if (result != null && result.isNotEmpty) {
+      int? val = int.tryParse(result);
+      if (val != null && val > 0) {
+        // Optional: Check stock limits if needed
+        // if (val > widget.product.stock) val = widget.product.stock;
+        
+        setState(() {
+          _quantity = val;
+        });
+      }
     }
   }
 
@@ -42,7 +82,6 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
 
     return Scaffold(
       backgroundColor: Colors.white,
-      // Extends body behind app bar for immersion
       extendBodyBehindAppBar: true, 
       appBar: AppBar(
         backgroundColor: Colors.transparent,
@@ -64,7 +103,6 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                   _buildGlassIcon(
                     icon: Icons.shopping_cart_outlined,
                     onTap: () {
-                      // --- FIX: Navigate to Cart Screen ---
                       Navigator.push(
                         context,
                         MaterialPageRoute(builder: (context) => const CartScreen()),
@@ -94,13 +132,12 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
         ],
       ),
       body: SingleChildScrollView(
-        // Padding bottom to account for the fixed bottom bar
         padding: const EdgeInsets.only(bottom: 100), 
         child: Column(
           children: [
-            // 1. IMMERSIVE IMAGE SECTION
+            // 1. IMAGE
             SizedBox(
-              height: size.height * 0.45, // 45% of screen height
+              height: size.height * 0.45,
               width: double.infinity,
               child: Stack(
                 children: [
@@ -115,7 +152,6 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                       ),
                     ),
                   ),
-                  // Gradient overlay at bottom of image for text readability transition
                   Positioned(
                     bottom: 0,
                     left: 0,
@@ -135,9 +171,9 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
               ),
             ),
 
-            // 2. CONTENT SHEET (Overlapping the image)
+            // 2. CONTENT
             Transform.translate(
-              offset: const Offset(0, -30), // Pull up by 30 pixels
+              offset: const Offset(0, -30),
               child: Container(
                 width: double.infinity,
                 decoration: const BoxDecoration(
@@ -151,7 +187,6 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Handle Bar (Visual cue)
                     Center(
                       child: Container(
                         width: 40,
@@ -164,7 +199,6 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                       ),
                     ),
 
-                    // Category Tag
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                       decoration: BoxDecoration(
@@ -183,7 +217,6 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                     ),
                     const SizedBox(height: 10),
 
-                    // Title and Price Row
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -212,7 +245,6 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                     ),
                     const SizedBox(height: 15),
 
-                    // Stock Status
                     Row(
                       children: [
                         Container(
@@ -226,7 +258,6 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                         const SizedBox(width: 8),
                         Text(
                           isOutOfStock ? 'Out of Stock' : 'In Stock ',
-                          //To add available Quantity//(${widget.product.stock} available)
                           style: TextStyle(
                             color: isOutOfStock ? Colors.red : Colors.green[700],
                             fontWeight: FontWeight.w600,
@@ -239,13 +270,11 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                     const Divider(height: 1, color: Colors.black12),
                     const SizedBox(height: 25),
 
-                    // Description Title
                     const Text(
                       "Description",
                       style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                     ),
                     const SizedBox(height: 10),
-                    // Description Body
                     Text(
                       widget.product.description,
                       style: TextStyle(fontSize: 15, height: 1.6, color: Colors.grey[600]),
@@ -261,7 +290,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                       ),
                       const SizedBox(height: 15),
                       Container(
-                        width: 140, // Fixed width for pill
+                        width: 140,
                         padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 5),
                         decoration: BoxDecoration(
                           color: Colors.grey[100],
@@ -271,7 +300,6 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            // Decrease
                             GestureDetector(
                               onTap: _decreaseQuantity,
                               child: Container(
@@ -285,20 +313,25 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                               ),
                             ),
                             
-                            // Number
-                            Text(
-                              '$_quantity',
-                              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                            // --- CLICKABLE QUANTITY TEXT ---
+                            GestureDetector(
+                              onTap: _showManualQuantityDialog,
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                                child: Text(
+                                  '$_quantity',
+                                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                                ),
+                              ),
                             ),
                             
-                            // Increase
                             GestureDetector(
                               onTap: _increaseQuantity,
                               child: Container(
                                 width: 35,
                                 height: 35,
                                 decoration: const BoxDecoration(
-                                  color: Colors.black, // High contrast for add
+                                  color: Colors.black, 
                                   shape: BoxShape.circle,
                                 ),
                                 child: const Icon(Icons.add, color: Colors.white, size: 18),
@@ -316,7 +349,6 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
         ),
       ),
       
-      // 3. FIXED BOTTOM BAR (CTA)
       bottomNavigationBar: Container(
         padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 15.0),
         decoration: BoxDecoration(
@@ -351,13 +383,12 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
               icon: Icon(isOutOfStock ? Icons.remove_shopping_cart : Icons.shopping_bag_outlined),
               label: Text(isOutOfStock ? 'Sold Out' : 'Add to Cart'),
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.transparent, // Transparent to show gradient
+                backgroundColor: Colors.transparent,
                 foregroundColor: Colors.white,
                 shadowColor: Colors.transparent,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
                 textStyle: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
               ).copyWith(
-                // Gradient Background workaround for ElevatedButton
                 backgroundBuilder: (context, states, child) {
                   return Container(
                     decoration: BoxDecoration(
@@ -390,7 +421,6 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
     );
   }
 
-  // Helper Widget for Glassmorphism Buttons
   Widget _buildGlassIcon({required IconData icon, required VoidCallback onTap}) {
     return ClipRRect(
       borderRadius: BorderRadius.circular(30),
@@ -402,7 +432,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
             width: 40,
             height: 40,
             decoration: BoxDecoration(
-              color: Colors.black.withOpacity(0.1), // Dark glass
+              color: Colors.black.withOpacity(0.1),
               shape: BoxShape.circle,
               border: Border.all(color: Colors.white.withOpacity(0.2)),
             ),

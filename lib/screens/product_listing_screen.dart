@@ -1,12 +1,14 @@
 // lib/screens/product_listing_screen.dart
-import 'dart:ui'; // Required for ImageFilter (Glassmorphism)
+import 'dart:ui'; 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:eight_express/models/product.dart';
 import 'package:eight_express/providers/product_provider.dart';
 import 'package:eight_express/providers/cart_provider.dart';
+import 'package:eight_express/providers/wishlist_provider.dart'; // ADDED
 import 'package:eight_express/screens/product_detail_screen.dart';
+import 'package:eight_express/widgets/custom_loader.dart'; // IMPORT LOADER
 
 class ProductListingScreen extends StatefulWidget {
   final String categoryName;
@@ -33,14 +35,13 @@ class _ProductListingScreenState extends State<ProductListingScreen> {
   @override
   Widget build(BuildContext context) {
     const Color orangeColor = Color(0xFFFE7F2D);
-    // Light background color for contrast against white cards
-    const Color backgroundColor = Color(0xFFF5F6F8); 
+    const Color backgroundColor = Color(0xFFF8F9FA); 
 
     return Scaffold(
       backgroundColor: backgroundColor,
       appBar: AppBar(
         title: Text(
-          '${widget.categoryName}',
+          widget.categoryName,
           style: const TextStyle(fontWeight: FontWeight.bold),
         ),
         backgroundColor: Colors.white,
@@ -50,64 +51,40 @@ class _ProductListingScreenState extends State<ProductListingScreen> {
       ),
       body: Consumer<ProductProvider>(
         builder: (context, productProvider, child) {
+          // --- UPDATED: Using Signature 08 Loader ---
           if (productProvider.isLoading) {
             return const Center(
-              child: CircularProgressIndicator(color: orangeColor),
+              child: CustomLoader(size: 80), 
             );
           }
 
           if (productProvider.errorMessage != null) {
             return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(20.0),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(
-                      productProvider.errorMessage!,
-                      style: const TextStyle(color: Colors.red),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 10),
-                    ElevatedButton(
-                      onPressed: () {
-                        productProvider.fetchProducts(categoryName: widget.categoryName);
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: orangeColor,
-                        foregroundColor: Colors.white,
-                      ),
-                      child: const Text('Retry'),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          }
-
-          if (productProvider.products.isEmpty) {
-            return Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.search_off, size: 80, color: Colors.grey[300]),
-                  const SizedBox(height: 15),
-                  Text(
-                    'No items in ${widget.categoryName}',
-                    style: TextStyle(fontSize: 18, color: Colors.grey[500], fontWeight: FontWeight.w500),
+                  Text(productProvider.errorMessage!, style: const TextStyle(color: Colors.red)),
+                  const SizedBox(height: 10),
+                  ElevatedButton(
+                    onPressed: () => productProvider.fetchProducts(categoryName: widget.categoryName),
+                    child: const Text('Retry'),
                   ),
                 ],
               ),
             );
           }
 
+          if (productProvider.products.isEmpty) {
+            return const Center(child: Text("No items found here."));
+          }
+
           return GridView.builder(
-            padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 20.0),
+            padding: const EdgeInsets.all(16.0),
+            cacheExtent: 500, // Optimization for scrolling
             gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
               crossAxisCount: 2,
               crossAxisSpacing: 16.0,
               mainAxisSpacing: 20.0,
-              // Optimized Aspect Ratio to prevent overflow and look taller/modern
               childAspectRatio: 0.65, 
             ),
             itemCount: productProvider.products.length,
@@ -124,20 +101,21 @@ class _ProductListingScreenState extends State<ProductListingScreen> {
 
 class ProductGridItem extends StatelessWidget {
   final Product product;
-
   const ProductGridItem({Key? key, required this.product}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
     const Color orangeColor = Color(0xFFFE7F2D);
     final bool isOutOfStock = product.stock <= 0;
+    
+    // Access Wishlist Provider
+    final wishlist = Provider.of<WishlistProvider>(context);
+    final isFav = wishlist.isFavorite(product.id);
 
     return GestureDetector(
       onTap: () {
         Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (ctx) => ProductDetailScreen(product: product),
-          ),
+          MaterialPageRoute(builder: (ctx) => ProductDetailScreen(product: product)),
         );
       },
       child: Container(
@@ -146,10 +124,9 @@ class ProductGridItem extends StatelessWidget {
           borderRadius: BorderRadius.circular(20),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.06), // Soft, premium shadow
-              spreadRadius: 1,
-              blurRadius: 15,
-              offset: const Offset(0, 8),
+              color: Colors.black.withOpacity(0.03), 
+              blurRadius: 10,
+              offset: const Offset(0, 5),
             ),
           ],
         ),
@@ -161,7 +138,6 @@ class ProductGridItem extends StatelessWidget {
               flex: 5,
               child: Stack(
                 children: [
-                  // Product Image
                   ClipRRect(
                     borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
                     child: Hero(
@@ -171,55 +147,44 @@ class ProductGridItem extends StatelessWidget {
                         width: double.infinity,
                         height: double.infinity,
                         fit: BoxFit.cover,
-                        placeholder: (context, url) => Center(
-                          child: CircularProgressIndicator(color: orangeColor.withOpacity(0.3)),
-                        ),
-                        errorWidget: (context, url, error) => Container(
-                          color: Colors.grey[50],
-                          child: const Icon(Icons.broken_image, size: 40, color: Colors.grey),
-                        ),
+                        memCacheWidth: 400, // RAM Optimization
+                        placeholder: (context, url) => const Center(child: CustomLoader(size: 30)),
+                        errorWidget: (context, url, error) => const Icon(Icons.broken_image),
                       ),
                     ),
                   ),
 
-                  // Glassmorphism Wishlist Button (Top Right)
+                  // --- ACTIVE WISHLIST BUTTON ---
                   Positioned(
                     top: 10,
                     right: 10,
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(30),
-                      child: BackdropFilter(
-                        filter: ImageFilter.blur(sigmaX: 5.0, sigmaY: 5.0),
-                        child: Container(
-                          width: 32,
-                          height: 32,
-                          decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.6),
-                            shape: BoxShape.circle,
+                    child: GestureDetector(
+                      onTap: () => wishlist.toggleWishlist(product),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(30),
+                        child: BackdropFilter(
+                          filter: ImageFilter.blur(sigmaX: 5.0, sigmaY: 5.0),
+                          child: Container(
+                            width: 32, height: 32,
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.6),
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(
+                              isFav ? Icons.favorite : Icons.favorite_border, 
+                              size: 18, 
+                              color: isFav ? Colors.red : Colors.black54
+                            ),
                           ),
-                          child: const Icon(Icons.favorite_border, size: 18, color: Colors.black54),
                         ),
                       ),
                     ),
                   ),
 
-                  // Out of Stock Overlay
                   if (isOutOfStock)
                     Container(
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.85),
-                        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-                      ),
-                      child: const Center(
-                        child: Text(
-                          "SOLD OUT",
-                          style: TextStyle(
-                            color: Colors.red, 
-                            fontWeight: FontWeight.w900,
-                            letterSpacing: 1.0,
-                          ),
-                        ),
-                      ),
+                      decoration: BoxDecoration(color: Colors.white.withOpacity(0.8), borderRadius: const BorderRadius.vertical(top: Radius.circular(20))),
+                      child: const Center(child: Text("SOLD OUT", style: TextStyle(color: Colors.red, fontWeight: FontWeight.w900))),
                     ),
                 ],
               ),
@@ -229,88 +194,52 @@ class ProductGridItem extends StatelessWidget {
             Expanded(
               flex: 3,
               child: Padding(
-                padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+                padding: const EdgeInsets.all(12),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    // Title
                     Text(
                       product.name,
-                      style: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.black87,
-                        height: 1.2,
-                      ),
-                      maxLines: 2, 
+                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                      maxLines: 1, 
                       overflow: TextOverflow.ellipsis,
                     ),
                     
-                    // Price & Gradient Add Button
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
-                        // Price
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'Price',
-                              style: TextStyle(fontSize: 10, color: Colors.grey),
-                            ),
-                            Text(
-                              '\₦${product.price.toStringAsFixed(0)}', // Rounded for cleaner look
-                              style: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w900,
-                                color: orangeColor,
-                              ),
-                            ),
-                          ],
+                        Expanded(
+                          child: Text(
+                            '\₦${product.price.toStringAsFixed(0)}',
+                            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: orangeColor),
+                          ),
                         ),
                         
-                        // Gradient Add Button
+                        // --- PREMIUM ADD BUTTON ---
                         GestureDetector(
                           onTap: !isOutOfStock
                               ? () {
-                                  Provider.of<CartProvider>(context, listen: false)
-                                      .addItem(product, quantity: 1);
-                                  
-                                  ScaffoldMessenger.of(context).hideCurrentSnackBar();
+                                  Provider.of<CartProvider>(context, listen: false).addItem(product);
                                   ScaffoldMessenger.of(context).showSnackBar(
                                     SnackBar(
                                       content: Text('${product.name} added!'),
-                                      duration: const Duration(milliseconds: 1000),
                                       behavior: SnackBarBehavior.floating,
+                                      duration: const Duration(seconds: 1),
                                       backgroundColor: Colors.green,
-                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                                     ),
                                   );
                                 }
                               : null,
                           child: Container(
-                            width: 36,
-                            height: 36,
+                            padding: const EdgeInsets.all(8),
                             decoration: BoxDecoration(
                               gradient: !isOutOfStock 
-                                ? const LinearGradient(
-                                    colors: [Color(0xFFFE7F2D), Color(0xFFFFB347)],
-                                    begin: Alignment.topLeft,
-                                    end: Alignment.bottomRight,
-                                  )
+                                ? const LinearGradient(colors: [orangeColor, Color(0xFFFFB347)])
                                 : const LinearGradient(colors: [Colors.grey, Colors.grey]),
-                              shape: BoxShape.circle,
-                              boxShadow: [
-                                BoxShadow(
-                                  color: orangeColor.withOpacity(0.4),
-                                  blurRadius: 8,
-                                  offset: const Offset(0, 4),
-                                )
-                              ],
+                              borderRadius: BorderRadius.circular(10),
                             ),
-                            child: const Icon(Icons.add, color: Colors.white, size: 20),
+                            child: const Icon(Icons.add_shopping_cart, color: Colors.white, size: 18),
                           ),
                         ),
                       ],

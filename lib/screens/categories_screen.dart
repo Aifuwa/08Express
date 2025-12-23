@@ -5,6 +5,8 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:eight_express/models/category_model.dart';
 import 'package:eight_express/providers/category_provider.dart';
 import 'package:eight_express/screens/product_listing_screen.dart';
+// ADDED: Import for your signature 08 loader
+import 'package:eight_express/widgets/custom_loader.dart';
 
 class CategoriesScreen extends StatefulWidget {
   const CategoriesScreen({Key? key}) : super(key: key);
@@ -18,7 +20,6 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
   @override
   void initState() {
     super.initState();
-    // Fetch categories when screen loads
     WidgetsBinding.instance.addPostFrameCallback((_) {
       Provider.of<CategoryProvider>(context, listen: false).fetchCategories();
     });
@@ -31,11 +32,9 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
 
     return Scaffold(
       backgroundColor: backgroundColor,
-      // Removed SafeArea to reduce top gap (assuming HomeScreen handles status bar)
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // 1. Header Section (Search Removed, Padding Reduced)
           Container(
             padding: const EdgeInsets.fromLTRB(20, 20, 20, 15),
             color: backgroundColor,
@@ -65,29 +64,24 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
             ),
           ),
 
-          // 2. Grid Content
           Expanded(
             child: Consumer<CategoryProvider>(
               builder: (context, categoryProvider, child) {
-                // --- LOADING ---
+                // --- UPDATED: Using Custom 08 Loader for Main List ---
                 if (categoryProvider.isLoading && categoryProvider.categories.isEmpty) {
-                  return const Center(child: CircularProgressIndicator(color: orangeColor));
+                  return const Center(child: CustomLoader(size: 70));
                 }
 
-                // --- ERROR ---
                 if (categoryProvider.errorMessage != null && categoryProvider.categories.isEmpty) {
                   return _buildErrorView(categoryProvider, orangeColor);
                 }
 
-                // --- EMPTY ---
                 if (categoryProvider.categories.isEmpty) {
                   return _buildEmptyView(categoryProvider, orangeColor);
                 }
 
-                // Filter: Only show active categories
                 final activeCategories = categoryProvider.categories.where((c) => c.active).toList();
 
-                // --- SUCCESS GRID ---
                 return GridView.builder(
                   padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 5.0),
                   gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
@@ -110,7 +104,6 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
     );
   }
 
-  // Helper: Error View
   Widget _buildErrorView(CategoryProvider provider, Color accentColor) {
     return Center(
       child: Column(
@@ -118,19 +111,11 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
         children: [
           Icon(Icons.error_outline, size: 40, color: Colors.red[300]),
           const SizedBox(height: 10),
-          Text(
-            provider.errorMessage!,
-            style: const TextStyle(color: Colors.grey),
-            textAlign: TextAlign.center,
-          ),
+          Text(provider.errorMessage!, style: const TextStyle(color: Colors.grey), textAlign: TextAlign.center),
           const SizedBox(height: 15),
           ElevatedButton(
             onPressed: () => provider.fetchCategories(),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: accentColor,
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-            ),
+            style: ElevatedButton.styleFrom(backgroundColor: accentColor, foregroundColor: Colors.white),
             child: const Text('Try Again'),
           ),
         ],
@@ -138,7 +123,6 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
     );
   }
 
-  // Helper: Empty View
   Widget _buildEmptyView(CategoryProvider provider, Color accentColor) {
     return Center(
       child: Column(
@@ -150,11 +134,7 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
           const SizedBox(height: 15),
           ElevatedButton(
             onPressed: () => provider.fetchCategories(),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: accentColor,
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-            ),
+            style: ElevatedButton.styleFrom(backgroundColor: accentColor, foregroundColor: Colors.white),
             child: const Text('Refresh'),
           ),
         ],
@@ -163,7 +143,6 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
   }
 }
 
-// --- CATEGORY CARD (Kept the modern classy design) ---
 class CategoryGridItem extends StatelessWidget {
   final AppCategory category;
   final Color accentColor;
@@ -176,9 +155,7 @@ class CategoryGridItem extends StatelessWidget {
       onTap: () {
         Navigator.of(context).push(
           MaterialPageRoute(
-            builder: (ctx) => ProductListingScreen(
-              categoryName: category.name,
-            ),
+            builder: (ctx) => ProductListingScreen(categoryName: category.name),
           ),
         );
       },
@@ -187,24 +164,17 @@ class CategoryGridItem extends StatelessWidget {
           color: Colors.white,
           borderRadius: BorderRadius.circular(24.0),
           boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.04), // Subtle premium shadow
-              offset: const Offset(0, 4),
-              blurRadius: 15,
-              spreadRadius: 2,
-            ),
+            BoxShadow(color: Colors.black.withOpacity(0.04), offset: const Offset(0, 4), blurRadius: 15, spreadRadius: 2),
           ],
         ),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(24.0),
           child: Stack(
             children: [
-              // Content Layout
               Column(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  // Image
                   Expanded(
                     flex: 3,
                     child: Padding(
@@ -215,70 +185,38 @@ class CategoryGridItem extends StatelessWidget {
                               child: CachedNetworkImage(
                                 imageUrl: category.imageUrl,
                                 fit: BoxFit.contain,
-                                placeholder: (context, url) => Center(
-                                  child: CircularProgressIndicator(
-                                    color: accentColor.withOpacity(0.3),
-                                    strokeWidth: 2,
-                                  ),
-                                ),
-                                errorWidget: (context, url, error) => Icon(
-                                  category.icon ?? Icons.category,
-                                  size: 40,
-                                  color: Colors.grey[300],
-                                ),
+                                // --- UPDATED: Using Small Custom 08 Loader for Image Placeholder ---
+                                placeholder: (context, url) => const Center(child: CustomLoader(size: 30)),
+                                errorWidget: (context, url, error) => Icon(category.icon ?? Icons.category, size: 40, color: Colors.grey[300]),
                               ),
                             )
-                          : Icon(
-                              category.icon ?? Icons.category,
-                              size: 50,
-                              color: accentColor.withOpacity(0.5),
-                            ),
+                          : Icon(category.icon ?? Icons.category, size: 50, color: accentColor.withOpacity(0.5)),
                     ),
                   ),
-                  
-                  // Text
                   Expanded(
                     flex: 1,
                     child: Container(
                       width: double.infinity,
                       padding: const EdgeInsets.symmetric(horizontal: 10),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.start,
-                        children: [
-                          Text(
-                            category.name,
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(
-                              fontSize: 15,
-                              fontWeight: FontWeight.w700,
-                              color: Colors.black87,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ],
+                      child: Text(
+                        category.name,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Colors.black87),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
                   ),
                 ],
               ),
-
-              // Corner Arrow Icon
               Positioned(
                 top: 12,
                 right: 12,
                 child: Container(
                   width: 24,
                   height: 24,
-                  decoration: BoxDecoration(
-                    color: Colors.grey[50],
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(
-                    Icons.arrow_outward_rounded,
-                    size: 14,
-                    color: accentColor,
-                  ),
+                  decoration: BoxDecoration(color: Colors.grey[50], shape: BoxShape.circle),
+                  child: Icon(Icons.arrow_outward_rounded, size: 14, color: accentColor),
                 ),
               ),
             ],

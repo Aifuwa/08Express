@@ -1,14 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Theme applied to the Android Window while the Flutter UI initializes -->
-    <style name="LaunchTheme" parent="@android:style/Theme.Light.NoTitleBar"> <!-- Use Theme.Light for white background -->
-        <!-- Show a splash screen on the activity. Automatically removed when Flutter draws its first frame -->
+    <!-- 1. The Theme for the very first second (Native) -->
+    <style name="LaunchTheme" parent="@android:style/Theme.Light.NoTitleBar">
         <item name="android:windowBackground">@drawable/launch_background</item>
+        <!-- Hides the Android 12+ icon -->
+        <item name="android:windowSplashScreenAnimatedIcon">@android:color/transparent</item>
+        <item name="android:windowSplashScreenBackground">@android:color/white</item>
     </style>
-    <!-- Theme for the MainActivity. Sets the Android system UI to be light-colored,
-         which is appropriate for a white splash screen background. -->
-    <style name="NormalTheme" parent="@android:style/Theme.Light.NoTitleBar"> <!-- Use Theme.Light -->
+
+    <!-- 2. The Theme while Flutter is "warming up" (The transition) -->
+    <style name="NormalTheme" parent="@android:style/Theme.Light.NoTitleBar">
+        <!-- CRUCIAL: This must match your SplashScreen background exactly -->
         <item name="android:windowBackground">@android:color/white</item>
-        <!-- You might want to adjust status bar colors here as well for the main app -->
     </style>
 </resources>
