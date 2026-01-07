@@ -1,14 +1,9 @@
-// lib/main.dart
 import 'dart:async';
-import 'dart:math';
-import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:provider/provider.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 
 import 'package:eight_express/firebase_options.dart';
 import 'package:eight_express/providers/user_provider.dart';
@@ -20,136 +15,151 @@ import 'package:eight_express/services/order_service.dart';
 
 import 'package:eight_express/screens/auth_screen.dart';
 import 'package:eight_express/screens/home_screen.dart';
-import 'package:eight_express/screens/splash_screen.dart';
+import 'package:eight_express/screens/splash_screen.dart'; 
 import 'package:eight_express/screens/categories_screen.dart';
 import 'package:eight_express/screens/my_orders_screen.dart';
-import 'package:eight_express/screens/product_detail_screen.dart';
-import 'package:eight_express/models/product.dart';
 
-// --- GLOBAL NAVIGATION KEY ---
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
-// Initialize FlutterLocalNotificationsPlugin
-final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
-    FlutterLocalNotificationsPlugin();
+// Define the channel globally so both Local Notifications and Firebase use the same ID
+const AndroidNotificationChannel channel = AndroidNotificationChannel(
+  'eight_express_high_importance_channel', // id
+  'Eight Express Notifications', // title
+  description: 'This channel is used for important notifications.', // description
+  importance: Importance.max,
+  playSound: true,
+);
+
+final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
 
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  // Ensure Firebase is initialized for background tasks
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   print("Handling a background message: ${message.messageId}");
 }
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
-
-  // --- LOCAL NOTIFICATION INITIALIZATION ---
-  const AndroidInitializationSettings initializationSettingsAndroid =
-      AndroidInitializationSettings('@mipmap/ic_launcher');
   
-  final DarwinInitializationSettings initializationSettingsDarwin =
-      DarwinInitializationSettings(
-    requestAlertPermission: true,
-    requestBadgePermission: true,
-    requestSoundPermission: true,
-  );
-  
-  final InitializationSettings initializationSettings = InitializationSettings(
-    android: initializationSettingsAndroid,
-    iOS: initializationSettingsDarwin,
-  );
-  
-  await flutterLocalNotificationsPlugin.initialize(
-    initializationSettings,
-    onDidReceiveNotificationResponse: (NotificationResponse response) async {
-      if (response.payload != null && navigatorKey.currentState != null) {
-        final String? payload = response.payload;
-        if (payload != null && payload.startsWith('product_detail/')) {
-          final productId = payload.split('/').last;
-          await _handleNotificationNavigation('product_detail', {'productId': productId});
-        } else if (payload != null) {
-          await _handleNotificationNavigation(payload);
-        }
-      }
-    },
-  );
+  // 1. Initialize Firebase
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
-  // --- FIREBASE MESSAGING SETUP ---
-  NotificationSettings settings = await FirebaseMessaging.instance.requestPermission(
-    alert: true, announcement: false, badge: true, carPlay: false, criticalAlert: false, provisional: false, sound: true,
-  );
-
-  FirebaseMessaging.onMessage.listen((RemoteMessage message) {
-    if (message.notification != null) {
-      flutterLocalNotificationsPlugin.show(
-        message.notification.hashCode,
-        message.notification!.title,
-        message.notification!.body,
-        NotificationDetails(
-          android: AndroidNotificationDetails(
-            'eight_express_channel',
-            'Eight Express Notifications',
-            channelDescription: 'Notifications for Eight Express App',
-            importance: Importance.max,
-            priority: Priority.high,
-            icon: '@mipmap/ic_launcher',
-          ),
-          iOS: const DarwinNotificationDetails(
-            presentAlert: true,
-            presentBadge: true,
-            presentSound: true,
-          ),
-        ),
-        payload: message.data['screen'] ?? 'default_payload', 
-      );
-    }
-  });
-
-  FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) async {
-    if (navigatorKey.currentState != null) {
-      await _handleNotificationNavigation(message.data['screen'], message.data);
-    }
-  });
-
+  // 2. Set Background Handler
   FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+
+  // 3. Setup Local Notifications and Channel
+  await flutterLocalNotificationsPlugin
+      .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+      ?.createNotificationChannel(channel);
+
+  // 4. Set foreground notification presentation options
+  await FirebaseMessaging.instance.setForegroundNotificationPresentationOptions(
+    alert: true,
+    badge: true,
+    sound: true,
+  );
 
   runApp(const MyApp());
 }
 
-// --- NAVIGATION HANDLER FUNCTION ---
-Future<void> _handleNotificationNavigation(String? screen, [Map<String, dynamic>? data]) async {
-  if (screen == null || navigatorKey.currentState == null) return;
+class MyApp extends StatefulWidget {
+  const MyApp({super.key});
 
-  if (screen == 'product_detail' && data != null && data['productId'] != null) {
-    final String productId = data['productId'];
-    try {
-      final productDoc = await FirebaseFirestore.instance.collection('products').doc(productId).get();
-      if (productDoc.exists) {
-        final product = Product.fromFirestore(productDoc);
-        navigatorKey.currentState?.pushAndRemoveUntil(
-          MaterialPageRoute(builder: (context) => ProductDetailScreen(product: product)),
-          (Route<dynamic> route) => false,
-        );
-      } else {
-        navigatorKey.currentState?.pushNamedAndRemoveUntil('/home', (route) => false);
-      }
-    } catch (e) {
-      navigatorKey.currentState?.pushNamedAndRemoveUntil('/home', (route) => false);
-    }
-  } else {
-    String routeName = '/home';
-    switch (screen) {
-      case 'my_orders': routeName = '/my_orders'; break;
-      case 'categories': routeName = '/categories'; break;
-    }
-    navigatorKey.currentState?.pushNamedAndRemoveUntil(routeName, (route) => false);
-  }
+  @override
+  State<MyApp> createState() => _MyAppState();
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+class _MyAppState extends State<MyApp> {
+  @override
+  void initState() {
+    super.initState();
+    // We call setup immediately; the internal await will handle the flow
+    _setupNotificationLogic();
+  }
+
+  Future<void> _setupNotificationLogic() async {
+    FirebaseMessaging messaging = FirebaseMessaging.instance;
+
+    // A. Request Permissions (Crucial for Android 13+)
+    NotificationSettings settings = await messaging.requestPermission(
+      alert: true,
+      badge: true,
+      sound: true,
+    );
+
+    if (settings.authorizationStatus == AuthorizationStatus.authorized) {
+      debugPrint('User granted permission');
+    }
+
+    // B. Initialize Local Notifications
+    const AndroidInitializationSettings androidInit = AndroidInitializationSettings('@mipmap/launcher_icon');
+    const InitializationSettings initSettings = InitializationSettings(android: androidInit);
+    
+    await flutterLocalNotificationsPlugin.initialize(
+      initSettings,
+      onDidReceiveNotificationResponse: (NotificationResponse response) {
+        if (response.payload != null) {
+          _handleNotificationNavigation(response.payload);
+        }
+      },
+    );
+
+    // C. Listen for Foreground Messages
+    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+      RemoteNotification? notification = message.notification;
+      AndroidNotification? android = message.notification?.android;
+
+      if (notification != null && android != null) {
+        flutterLocalNotificationsPlugin.show(
+          notification.hashCode,
+          notification.title,
+          notification.body,
+          NotificationDetails(
+            android: AndroidNotificationDetails(
+              channel.id,
+              channel.name,
+              channelDescription: channel.description,
+              importance: Importance.max,
+              priority: Priority.high,
+              icon: '@mipmap/launcher_icon',
+            ),
+          ),
+          payload: message.data['screen'], // Ensure your FCM data payload contains 'screen'
+        );
+      }
+    });
+
+    // D. Listen for Background Click (When app is in background but not terminated)
+    FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) {
+      _handleNotificationNavigation(message.data['screen']);
+    });
+
+    // E. Handle Terminated State Click
+    RemoteMessage? initialMessage = await FirebaseMessaging.instance.getInitialMessage();
+    if (initialMessage != null) {
+      _handleNotificationNavigation(initialMessage.data['screen']);
+    }
+
+    // F. Token Management
+    String? token = await messaging.getToken();
+    debugPrint("FCM TOKEN: $token");
+  }
+
+  void _handleNotificationNavigation(String? screen) {
+    if (screen == null || navigatorKey.currentState == null) return;
+    
+    // Using a delay to ensure the navigator is ready
+    Future.delayed(Duration.zero, () {
+      if (screen == 'my_orders') {
+        navigatorKey.currentState?.pushNamed('/my_orders');
+      } else if (screen == 'categories') {
+        navigatorKey.currentState?.pushNamed('/categories');
+      } else {
+        navigatorKey.currentState?.pushNamed('/home');
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -159,17 +169,13 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => CartProvider()),
         ChangeNotifierProvider(create: (_) => CategoryProvider()),
         ChangeNotifierProvider(create: (_) => ProductProvider()),
-        ChangeNotifierProvider(create: (_) => WishlistProvider()),
-        
+        ChangeNotifierProvider(create: (_) => WishlistProvider()), 
         ChangeNotifierProxyProvider2<UserProvider, CartProvider, OrderService>(
           create: (context) => OrderService(
-            Provider.of<UserProvider>(context, listen: false),
-            Provider.of<CartProvider>(context, listen: false),
+            Provider.of<UserProvider>(context, listen: false), 
+            Provider.of<CartProvider>(context, listen: false)
           ),
-          update: (context, userProvider, cartProvider, previousOrderService) => OrderService(
-            userProvider,
-            cartProvider,
-          ),
+          update: (context, user, cart, prev) => OrderService(user, cart),
         ),
       ],
       child: MaterialApp(
@@ -178,33 +184,30 @@ class MyApp extends StatelessWidget {
         debugShowCheckedModeBanner: false,
         theme: ThemeData(
           primarySwatch: Colors.deepOrange,
-          colorScheme: ColorScheme.fromSwatch(primarySwatch: Colors.deepOrange).copyWith(secondary: Colors.amber),
           appBarTheme: const AppBarTheme(
-            backgroundColor: Color.fromRGBO(57, 64, 83, 1),
-            foregroundColor: Colors.white,
+            backgroundColor: Color.fromRGBO(57, 64, 83, 1), 
+            foregroundColor: Colors.white
           ),
         ),
+        home: const AuthWrapper(), 
         routes: {
           '/auth': (context) => const AuthScreen(),
           '/home': (context) => const HomeScreen(),
-          '/splash': (context) => const SplashScreen(),
           '/categories': (context) => const CategoriesScreen(),
           '/my_orders': (context) => const MyOrdersScreen(), 
         },
-        home: StreamBuilder<User?>(
-          stream: FirebaseAuth.instance.authStateChanges(),
-          builder: (ctx, userSnapshot) {
-            // --- CRUCIAL: Pointing to your Custom SplashScreen while waiting ---
-            if (userSnapshot.connectionState == ConnectionState.waiting) {
-              return const SplashScreen();
-            }
-            if (userSnapshot.hasData) {
-              return const HomeScreen();
-            }
-            return const AuthScreen();
-          },
-        ),
       ),
     );
+  }
+}
+
+class AuthWrapper extends StatelessWidget {
+  const AuthWrapper({super.key});
+  @override
+  Widget build(BuildContext context) {
+    final userProvider = Provider.of<UserProvider>(context);
+    if (userProvider.isLoading) return const SplashScreen();
+    if (userProvider.isAuthenticated || userProvider.isGuest) return const HomeScreen();
+    return const AuthScreen();
   }
 }

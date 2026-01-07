@@ -1,7 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class UserAddress {
-  String id; // Optional: for identifying specific addresses in Firestore subcollection
+  String id; 
   String street;
   String city;
   String state;
@@ -10,7 +10,7 @@ class UserAddress {
   bool isDefault;
 
   UserAddress({
-    this.id = '', // Default to empty, will be set by Firestore
+    this.id = '', 
     required this.street,
     required this.city,
     required this.state,
@@ -19,9 +19,9 @@ class UserAddress {
     this.isDefault = false,
   });
 
-  factory UserAddress.fromMap(Map<String, dynamic> data, {String? id}) {
+  factory UserAddress.fromMap(Map<String, dynamic> data) {
     return UserAddress(
-      id: id ?? data['id'] ?? '',
+      id: data['id'] as String? ?? '',
       street: data['street'] as String? ?? '',
       city: data['city'] as String? ?? '',
       state: data['state'] as String? ?? '',
@@ -33,6 +33,7 @@ class UserAddress {
 
   Map<String, dynamic> toMap() {
     return {
+      'id': id,
       'street': street,
       'city': city,
       'state': state,
@@ -44,13 +45,14 @@ class UserAddress {
 }
 
 class AppUser {
-  final String uid; // Firebase User ID
-  String? email; // Can be null if signed in with phone
+  final String uid; 
+  String? email; 
   String? name;
-  String? imageUrl; // For profile picture
-  String? phoneNumber; // Can be null if signed in with email
-  // List of addresses for the user
+  String? imageUrl; 
+  String? phoneNumber; 
+  bool isAdmin; 
   List<UserAddress> addresses;
+  List<String> wishlist; 
 
   AppUser({
     required this.uid,
@@ -58,37 +60,42 @@ class AppUser {
     this.name,
     this.imageUrl,
     this.phoneNumber,
-    this.addresses = const [], // Initialize with an empty list
-  });
+    this.isAdmin = false,
+    List<UserAddress>? addresses,
+    List<String>? wishlist,
+  })  : addresses = addresses ?? [],
+        wishlist = wishlist ?? [];
 
   factory AppUser.fromFirestore(DocumentSnapshot doc) {
-    Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
-
+    Map<String, dynamic> data = doc.data() as Map<String, dynamic>? ?? {};
     List<UserAddress> loadedAddresses = [];
     if (data['addresses'] is List) {
       loadedAddresses = (data['addresses'] as List)
           .map((addressMap) => UserAddress.fromMap(addressMap as Map<String, dynamic>))
           .toList();
     }
-
     return AppUser(
       uid: doc.id,
-      email: data['email'],
-      name: data['name'],
-      imageUrl: data['imageUrl'],
-      phoneNumber: data['phoneNumber'],
+      email: data['email'] as String?,
+      name: data['name'] as String?,
+      imageUrl: data['imageUrl'] as String?,
+      phoneNumber: data['phoneNumber'] as String?,
+      isAdmin: data['isAdmin'] as bool? ?? false,
       addresses: loadedAddresses,
+      wishlist: List<String>.from(data['wishlist'] ?? []),
     );
   }
 
   Map<String, dynamic> toFirestore() {
     return {
-      if (email != null && email!.isNotEmpty) 'email': email,
-      if (name != null && name!.isNotEmpty) 'name': name,
-      if (imageUrl != null && imageUrl!.isNotEmpty) 'imageUrl': imageUrl,
-      if (phoneNumber != null && phoneNumber!.isNotEmpty) 'phoneNumber': phoneNumber,
-      'addresses': addresses.map((addr) => addr.toMap()).toList(), // Store addresses
-      'createdAt': FieldValue.serverTimestamp(),
+      'email': email,
+      'name': name,
+      'imageUrl': imageUrl,
+      'phoneNumber': phoneNumber,
+      'isAdmin': isAdmin,
+      'addresses': addresses.map((addr) => addr.toMap()).toList(), 
+      'wishlist': wishlist,
+      'updatedAt': FieldValue.serverTimestamp(),
     };
   }
 }

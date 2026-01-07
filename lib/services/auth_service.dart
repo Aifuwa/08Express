@@ -4,45 +4,40 @@ import 'package:flutter/foundation.dart';
 class AuthService {
   final FirebaseAuth _firebaseAuth = FirebaseAuth.instance;
 
-  Stream<User?> get user {
-    return _firebaseAuth.authStateChanges();
-  }
+  Stream<User?> get user => _firebaseAuth.authStateChanges();
 
+  // REGISTER EMAIL
   Future<User?> registerWithEmailAndPassword(String email, String password) async {
     try {
-      UserCredential result = await _firebaseAuth.createUserWithEmailAndPassword(email: email, password: password);
-      // Send Verification Email immediately after signup
-      if (result.user != null && !result.user!.emailVerified) {
+      UserCredential result = await _firebaseAuth.createUserWithEmailAndPassword(
+        email: email.trim(), 
+        password: password
+      );
+      // Send real verification link immediately
+      if (result.user != null) {
         await result.user!.sendEmailVerification();
       }
       return result.user;
     } on FirebaseAuthException catch (e) {
-      debugPrint("Auth Error: ${e.message}");
-      throw e;
-    } catch (e) {
-      throw Exception("An unknown error occurred");
+      throw e.message ?? "Registration failed";
     }
   }
 
+  // LOGIN EMAIL
   Future<User?> signInWithEmailAndPassword(String email, String password) async {
     try {
-      UserCredential result = await _firebaseAuth.signInWithEmailAndPassword(email: email, password: password);
+      UserCredential result = await _firebaseAuth.signInWithEmailAndPassword(
+        email: email.trim(), 
+        password: password
+      );
       return result.user;
     } on FirebaseAuthException catch (e) {
-      debugPrint("Auth Error: ${e.message}");
-      throw e;
-    } catch (e) {
-      throw Exception("An unknown error occurred");
+      throw e.message ?? "Login failed";
     }
   }
 
-  // --- NEW: Password Reset ---
   Future<void> sendPasswordResetEmail(String email) async {
-    try {
-      await _firebaseAuth.sendPasswordResetEmail(email: email);
-    } on FirebaseAuthException catch (e) {
-      throw e;
-    }
+    await _firebaseAuth.sendPasswordResetEmail(email: email.trim());
   }
 
   Future<void> signOut() async {

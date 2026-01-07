@@ -5,17 +5,23 @@ import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+
+// Import project models and providers
 import 'package:eight_express/models/product.dart';
-import 'package:eight_express/screens/product_detail_screen.dart';
 import 'package:eight_express/providers/cart_provider.dart';
 import 'package:eight_express/providers/wishlist_provider.dart';
-import 'package:eight_express/screens/cart_screen.dart';
 import 'package:eight_express/providers/user_provider.dart';
+
+// Import screens
+import 'package:eight_express/screens/product_detail_screen.dart';
+import 'package:eight_express/screens/cart_screen.dart';
 import 'package:eight_express/screens/categories_screen.dart';
 import 'package:eight_express/screens/wishlist_screen.dart';
 import 'package:eight_express/screens/profile_screen.dart';
 import 'package:eight_express/screens/my_orders_screen.dart';
 import 'package:eight_express/screens/auth_screen.dart';
+
+// Import signature loader
 import 'package:eight_express/widgets/custom_loader.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -32,11 +38,11 @@ class _HomeScreenState extends State<HomeScreen> {
   final Color _primaryColor = const Color(0xFFFE7F2D);
 
   final List<Widget> _widgetOptions = <Widget>[
-    Container(), 
-    const CategoriesScreen(),
-    const WishlistScreen(),
-    const CartScreen(),
-    const ProfileScreen(),
+    Container(), // 0: Home (Listing handled in build)
+    const CategoriesScreen(), // 1
+    const WishlistScreen(), // 2
+    const CartScreen(), // 3
+    const ProfileScreen(), // 4
   ];
 
   @override
@@ -55,6 +61,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
   void _onItemTapped(int index) {
     final userProvider = Provider.of<UserProvider>(context, listen: false);
+    
+    // Gatekeeping: Blocks Wishlist (2), Cart (3), and Profile (4) for guests
     if (index > 1 && userProvider.isGuest) {
       _showLoginSheet(context);
       return;
@@ -99,6 +107,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Hide header only on Profile Screen (Index 4)
     bool isProfileScreen = _selectedIndex == 4;
 
     return Scaffold(
@@ -134,7 +143,14 @@ class _HomeScreenState extends State<HomeScreen> {
           BottomNavigationBarItem(icon: Icon(Icons.face_rounded), label: 'Account'),
         ],
         currentIndex: _selectedIndex,
-        selectedItemColor: _selectedIndex == 0 ? Colors.orange : (_selectedIndex == 1 ? Colors.blue : (_selectedIndex == 2 ? Colors.red : (_selectedIndex == 3 ? Colors.green : Colors.indigo))),
+        // Colorful Icons
+        selectedItemColor: _selectedIndex == 0 
+            ? Colors.orange 
+            : (_selectedIndex == 1 
+                ? Colors.blue 
+                : (_selectedIndex == 2 
+                    ? Colors.red 
+                    : (_selectedIndex == 3 ? Colors.green : Colors.indigo))),
         unselectedItemColor: Colors.grey.shade400,
         showUnselectedLabels: true,
         type: BottomNavigationBarType.fixed,
@@ -222,7 +238,6 @@ class _HomeScreenState extends State<HomeScreen> {
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.horizontal(right: Radius.circular(30))),
       child: Column(
         children: [
-          // Header - Dynamic based on Login state
           Container(
             width: double.infinity,
             padding: const EdgeInsets.fromLTRB(25, 70, 25, 40),
@@ -257,7 +272,7 @@ class _HomeScreenState extends State<HomeScreen> {
             if (isGuest) _showLoginSheet(context); else Navigator.push(context, MaterialPageRoute(builder: (_) => const MyOrdersScreen()));
           }),
 
-          // --- DYNAMIC LOGIN/SIGNUP BUTTON FOR GUESTS ---
+          // --- LOGIN BUTTON FOR GUESTS ---
           if (isGuest) ...[
             const SizedBox(height: 20),
             Padding(
@@ -295,7 +310,7 @@ class _HomeScreenState extends State<HomeScreen> {
               children: [
                 const Text("08Express", style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18, color: Colors.black54, letterSpacing: 1)),
                 const SizedBox(height: 4),
-                Text("by 08Vic Enterprises 2025", style: TextStyle(color: Colors.grey.shade400, fontSize: 11, fontWeight: FontWeight.w500)),
+                Text("by 08Vic Enterprises 2026", style: TextStyle(color: Colors.grey.shade400, fontSize: 11, fontWeight: FontWeight.w500)),
               ],
             ),
           ),
@@ -334,7 +349,7 @@ class ProductListingScreen extends StatelessWidget {
         return GridView.builder(
           padding: const EdgeInsets.all(16),
           cacheExtent: 500,
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, childAspectRatio: 0.65, crossAxisSpacing: 15, mainAxisSpacing: 15),
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, childAspectRatio: 0.64, crossAxisSpacing: 15, mainAxisSpacing: 15),
           itemCount: products.length,
           itemBuilder: (context, index) => ProductGridItem(key: ValueKey(products[index].id), product: products[index]),
         );
@@ -399,6 +414,7 @@ class ProductGridItem extends StatelessWidget {
                   Text("₦${product.price.toStringAsFixed(0)}", style: const TextStyle(color: Color(0xFFFE7F2D), fontWeight: FontWeight.w900, fontSize: 16)),
                   const SizedBox(height: 10),
                   
+                  // --- PREMIUM ADD BUTTON (TEXT + ICON) ---
                   InkWell(
                     onTap: () {
                       Provider.of<CartProvider>(context, listen: false).addItem(product);
@@ -410,10 +426,11 @@ class ProductGridItem extends StatelessWidget {
                       decoration: BoxDecoration(
                         gradient: const LinearGradient(colors: [Color(0xFFFE7F2D), Color(0xFFFFB347)]),
                         borderRadius: BorderRadius.circular(12),
+                        boxShadow: [BoxShadow(color: const Color(0xFFFE7F2D).withOpacity(0.3), blurRadius: 8, offset: const Offset(0, 4))],
                       ),
-                      child: const Row(
+                      child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
+                        children: const [
                           Icon(Icons.add_shopping_cart_rounded, color: Colors.white, size: 16),
                           SizedBox(width: 8),
                           Text("ADD", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),

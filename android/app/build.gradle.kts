@@ -4,7 +4,6 @@ import java.io.FileInputStream
 plugins {
     id("com.android.application")
     id("kotlin-android")
-    // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
     id("com.google.gms.google-services")
 }
@@ -17,7 +16,9 @@ if (keystorePropertiesFile.exists()) {
 
 android {
     namespace = "com.example.eight_express"
-    compileSdk = flutter.compileSdkVersion
+    
+    // FIXED: Explicitly set to 35 to support Firebase Push Notifications
+    compileSdk = 36 
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
@@ -32,8 +33,11 @@ android {
 
     defaultConfig {
         applicationId = "com.example.eight_express"
-        minSdk = flutter.minSdkVersion
-        targetSdk = flutter.targetSdkVersion
+        minSdk = flutter.minSdkVersion // Recommended for modern apps
+        
+        // FIXED: Explicitly set to 35 to prevent "Unknown calling package" error
+        targetSdk = 35 
+        
         versionCode = flutter.versionCode
         versionName = flutter.versionName
         
@@ -42,23 +46,29 @@ android {
 
     signingConfigs {
         create("release") {
-            // This loads the keys from your key.properties file
-            keyAlias = keystoreProperties["keyAlias"] as String
-            keyPassword = keystoreProperties["keyPassword"] as String
-            storeFile = file(keystoreProperties["storeFile"] as String)
-            storePassword = keystoreProperties["storePassword"] as String
+            // Check if properties exist to prevent build crash
+            if (keystorePropertiesFile.exists()) {
+                keyAlias = keystoreProperties["keyAlias"] as String
+                keyPassword = keystoreProperties["keyPassword"] as String
+                storeFile = file(keystoreProperties["storeFile"] as String)
+                storePassword = keystoreProperties["storePassword"] as String
+            }
         }
     }
 
     buildTypes {
         getByName("release") {
-            // UPDATED: Now uses the release key defined above
             signingConfig = signingConfigs.getByName("release")
             
-            // OPTIONAL: Shrinks app size and obfuscates code (Good for production)
+            // Shrinking enabled for production
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+        }
+        
+        getByName("debug") {
+            // Ensure debug builds use the standard debug key for FCM testing
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 }
@@ -68,9 +78,6 @@ flutter {
 }
 
 dependencies {
-    // Allows newer Java features on older Androids
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
-    
-    // Fixes the 64k method limit crash
     implementation("androidx.multidex:multidex:2.0.1") 
 }

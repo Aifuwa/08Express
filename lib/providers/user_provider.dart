@@ -3,120 +3,42 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
-import 'package:eight_express/services/auth_service.dart';
 import 'package:eight_express/models/app_user.dart';
 
 class UserProvider with ChangeNotifier {
-  final AuthService _authService = AuthService();
+  final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final FirebaseStorage _storage = FirebaseStorage.instance; 
+  final FirebaseStorage _storage = FirebaseStorage.instance;
 
   User? _firebaseUser;
   AppUser? _appUser;
   bool _isGuestMode = false;
+  bool _isLoading = true; 
+  String? _verificationId;
 
   UserProvider() {
-    _authService.user.listen((firebaseUser) {
+    _auth.authStateChanges().listen((firebaseUser) async {
       _firebaseUser = firebaseUser;
       if (_firebaseUser != null) {
         _isGuestMode = false;
-        _loadAppUser(_firebaseUser!.uid);
+        await _loadAppUser(_firebaseUser!.uid);
       } else {
         _appUser = null;
-        notifyListeners();
       }
+      _isLoading = false; 
+      notifyListeners(); 
     });
   }
 
+  // --- GETTERS ---
   User? get firebaseUser => _firebaseUser;
   AppUser? get appUser => _appUser;
-  bool get isAuthenticated => _firebaseUser != null;
+  bool get isAuthenticated => _firebaseUser != null; 
   bool get isGuest => _isGuestMode;
+  bool get isLoading => _isLoading; 
 
   void enterGuestMode() {
     _isGuestMode = true;
-    notifyListeners();
-  }
-
-  bool _isEmail(String input) {
-    return input.contains('@');
-  }
-
-  String _normalizeToAuthEmail(String input) {
-    if (_isEmail(input)) return input.trim();
-    String cleanPhone = input.replaceAll(RegExp(r'[^\d]'), '');
-    return '$cleanPhone@eightexpress.com'; 
-  }
-
-  // --- LOGIN ---
-  Future<User?> login(String identity, String password) async {
-    String authEmail = _normalizeToAuthEmail(identity);
-    return await _authService.signInWithEmailAndPassword(authEmail, password);
-  }
-
-  // --- REGISTER ---
-  Future<User?> register(String identity, String password, String name) async {
-    String authEmail = _normalizeToAuthEmail(identity);
-    bool isEmailInput = _isEmail(identity);
-
-    User? user = await _authService.registerWithEmailAndPassword(authEmail, password);
-    
-    if (user != null) {
-      AppUser newUser = AppUser(
-        uid: user.uid,
-        email: isEmailInput ? identity : authEmail,
-        phoneNumber: !isEmailInput ? identity : null,
-        name: name,
-        addresses: [],
-      );
-      
-      await _firestore.collection('users').doc(user.uid).set(newUser.toFirestore());
-      await _loadAppUser(user.uid);
-    }
-    return user;
-  }
-
-  // --- RESET PASSWORD ---
-  Future<void> resetPassword(String identity) async {
-    String authEmail = _normalizeToAuthEmail(identity);
-    await _authService.sendPasswordResetEmail(authEmail);
-  }
-
-  Future<void> changePassword(String currentPassword, String newPassword) async {
-    if (_firebaseUser == null || _firebaseUser!.email == null) {
-      throw FirebaseAuthException(code: 'no-user', message: 'No user logged in');
-    }
-    AuthCredential credential = EmailAuthProvider.credential(
-      email: _firebaseUser!.email!,
-      password: currentPassword,
-    );
-    await _firebaseUser!.reauthenticateWithCredential(credential);
-    await _firebaseUser!.updatePassword(newPassword);
-  }
-
-  // --- NEW: SECURE ACCOUNT DELETION ---
-  Future<void> deleteAccount(String password) async {
-    if (_firebaseUser == null || _firebaseUser!.email == null) {
-      throw FirebaseAuthException(code: 'no-user', message: 'No user logged in');
-    }
-
-    // 1. Re-authenticate the user (Required for sensitive operations like deletion)
-    AuthCredential credential = EmailAuthProvider.credential(
-      email: _firebaseUser!.email!,
-      password: password,
-    );
-    await _firebaseUser!.reauthenticateWithCredential(credential);
-
-    // 2. Delete User Data from Firestore
-    await _firestore.collection('users').doc(_firebaseUser!.uid).delete();
-
-    // 3. Delete from Firebase Auth
-    await _firebaseUser!.delete();
-
-    // 4. Reset Local State
-    _appUser = null;
-    _firebaseUser = null;
-    _isGuestMode = false;
     notifyListeners();
   }
 
@@ -126,70 +48,231 @@ class UserProvider with ChangeNotifier {
       if (doc.exists) {
         _appUser = AppUser.fromFirestore(doc);
       }
-      notifyListeners();
     } catch (e) {
-      debugPrint("Error loading user: $e");
+      debugPrint("Error loading AppUser: $e");
     }
   }
 
-  Future<void> signOut() async {
-    _isGuestMode = false;
-    await _authService.signOut();
+  // --- EMAIL AUTH ---
+
+  Future<void> registerWithEmail(String email, String password, String name) async {
+    try {
+      UserCredential result = await _auth.createUserWithEmailAndPassword(
+          email: email.trim(), password: password.trim());
+
+      if (result.user != null) {
+        AppUser newUser = AppUser(
+          uid: result.user!.uid,
+          email: email.trim(),
+          name: name,
+        );
+        await _firestore.collection('users').doc(result.user!.uid).set(newUser.toFirestore());
+        await result.user!.sendEmailVerification();
+      }
+    } on FirebaseAuthException catch (e) {
+      throw e.message ?? "Registration failed";
+    }
   }
+
+  Future<void> login(String email, String password) async {
+    try {
+      await _auth.signInWithEmailAndPassword(email: email.trim(), password: password.trim());
+    } on FirebaseAuthException catch (e) {
+      throw e.message ?? "Login failed";
+    }
+  }
+
+  Future<bool> checkEmailVerified() async {
+    User? user = _auth.currentUser;
+    if (user != null) {
+      await user.reload(); 
+      return _auth.currentUser!.emailVerified;
+    }
+    return false;
+  }
+
+  // --- PHONE OTP AUTH ---
+
+  Future<void> sendOTP(String phoneNumber, {required Function(String) onCodeSent, required Function(String) onError}) async {
+    try {
+      String formattedPhone = _formatToE164(phoneNumber);
+      await _auth.verifyPhoneNumber(
+        phoneNumber: formattedPhone,
+        verificationCompleted: (cred) async => await _auth.signInWithCredential(cred),
+        verificationFailed: (e) => onError(e.message ?? "Verification failed"),
+        codeSent: (id, token) {
+          _verificationId = id; 
+          onCodeSent(id);
+        },
+        codeAutoRetrievalTimeout: (id) => _verificationId = id,
+      );
+    } catch (e) {
+      onError(e.toString());
+    }
+  }
+
+  Future<void> verifyOTPAndLogin(String smsCode, {String? name}) async {
+    if (_verificationId == null) throw "Verification session expired.";
+    try {
+      PhoneAuthCredential credential = PhoneAuthProvider.credential(
+          verificationId: _verificationId!, smsCode: smsCode.trim());
+
+      UserCredential result = await _auth.signInWithCredential(credential);
+      if (result.user != null) {
+        final doc = await _firestore.collection('users').doc(result.user!.uid).get();
+        if (!doc.exists) {
+          AppUser newUser = AppUser(
+            uid: result.user!.uid,
+            phoneNumber: result.user!.phoneNumber,
+            name: name ?? "User",
+          );
+          await _firestore.collection('users').doc(result.user!.uid).set(newUser.toFirestore());
+        }
+      }
+    } catch (e) {
+      throw "Invalid Code. Please try again.";
+    }
+  }
+
+  // --- ACCOUNT & PASSWORD MGMT ---
+
+  Future<void> signOut() async {
+    await _auth.signOut();
+    _isGuestMode = false;
+    _appUser = null;
+    notifyListeners();
+  }
+
+  Future<void> resetPassword(String email) async {
+    try {
+      await _auth.sendPasswordResetEmail(email: email.trim());
+    } on FirebaseAuthException catch (e) {
+      throw e.message ?? "Error sending reset link.";
+    }
+  }
+
+  Future<void> changePassword(String currentPassword, String newPassword) async {
+    User? user = _auth.currentUser;
+    if (user == null || user.email == null) return;
+    AuthCredential cred = EmailAuthProvider.credential(email: user.email!, password: currentPassword);
+    await user.reauthenticateWithCredential(cred);
+    await user.updatePassword(newPassword);
+  }
+
+  Future<void> deleteAccount(String password) async {
+    User? user = _auth.currentUser;
+    if (user == null || user.email == null) return;
+    AuthCredential cred = EmailAuthProvider.credential(email: user.email!, password: password);
+    await user.reauthenticateWithCredential(cred);
+    await _firestore.collection('users').doc(user.uid).delete();
+    await user.delete();
+    await signOut();
+  }
+
+  // --- PROFILE & IMAGES ---
 
   Future<void> updateAppUserProfile({String? name, String? imageUrl, String? phoneNumber}) async {
     if (_firebaseUser == null) return;
     Map<String, dynamic> updateData = {};
-    if (name != null) { updateData['name'] = name; _appUser?.name = name; }
-    if (imageUrl != null) { updateData['imageUrl'] = imageUrl; _appUser?.imageUrl = imageUrl; }
-    if (phoneNumber != null) { updateData['phoneNumber'] = phoneNumber; _appUser?.phoneNumber = phoneNumber; }
-    if (updateData.isNotEmpty) {
-      await _firestore.collection('users').doc(_firebaseUser!.uid).update(updateData);
-      notifyListeners();
+    if (name != null) {
+      updateData['name'] = name;
+      _appUser?.name = name;
     }
+    if (imageUrl != null) {
+      updateData['imageUrl'] = imageUrl;
+      _appUser?.imageUrl = imageUrl;
+    }
+    if (phoneNumber != null) {
+      updateData['phoneNumber'] = phoneNumber;
+      _appUser?.phoneNumber = phoneNumber;
+    }
+    await _firestore.collection('users').doc(_firebaseUser!.uid).update(updateData);
+    notifyListeners();
   }
 
   Future<void> uploadProfileImage(File imageFile) async {
      if (_firebaseUser == null) return;
-     try {
-       String fileName = 'profile_${_firebaseUser!.uid}.jpg';
-       Reference ref = _storage.ref().child('user_profiles').child(fileName);
-       UploadTask uploadTask = ref.putFile(imageFile);
-       TaskSnapshot snapshot = await uploadTask;
-       String downloadUrl = await snapshot.ref.getDownloadURL();
-       await updateAppUserProfile(imageUrl: downloadUrl);
-     } catch (e) { rethrow; }
+     String fileName = 'profile_${_firebaseUser!.uid}.jpg';
+     Reference ref = _storage.ref().child('user_profiles').child(fileName);
+     await ref.putFile(imageFile);
+     String url = await ref.getDownloadURL();
+     await updateAppUserProfile(imageUrl: url);
   }
 
+  // --- WISHLIST ---
+
+  bool isInWishlist(String productId) {
+    if (_appUser == null) return false;
+    return _appUser!.wishlist.contains(productId);
+  }
+
+  Future<void> toggleWishlist(String productId) async {
+    if (_firebaseUser == null || _appUser == null) return;
+
+    if (_appUser!.wishlist.contains(productId)) {
+      _appUser!.wishlist.remove(productId);
+    } else {
+      _appUser!.wishlist.add(productId);
+    }
+    notifyListeners();
+
+    try {
+      await _firestore.collection('users').doc(_firebaseUser!.uid).update({
+        'wishlist': _appUser!.wishlist,
+      });
+    } catch (e) {
+      debugPrint("Wishlist sync error: $e");
+    }
+  }
+
+  // --- ADDRESS MGMT ---
+
   Future<void> addAddress(UserAddress newAddress) async {
-     if (_firebaseUser == null) return;
-     if (newAddress.isDefault) _appUser?.addresses.forEach((addr) => addr.isDefault = false);
-     _appUser?.addresses.add(newAddress);
+     if (_appUser == null) return;
+     if (newAddress.isDefault) { 
+       for (var addr in _appUser!.addresses) {
+         addr.isDefault = false;
+       } 
+     }
+     _appUser!.addresses.add(newAddress);
      await _saveAddresses();
   }
 
   Future<void> updateAddress(UserAddress updatedAddress) async {
-      if (_firebaseUser == null || _appUser == null) return;
-      int index = _appUser!.addresses.indexWhere((addr) => addr.id == updatedAddress.id);
-      if (index != -1) {
-        if (updatedAddress.isDefault) {
-          for (var addr in _appUser!.addresses) addr.isDefault = false;
+    if (_appUser == null) return;
+    int index = _appUser!.addresses.indexWhere((addr) => addr.id == updatedAddress.id);
+    if (index != -1) {
+      if (updatedAddress.isDefault) {
+        for (var addr in _appUser!.addresses) {
+          addr.isDefault = false;
         }
-        _appUser!.addresses[index] = updatedAddress;
-        await _saveAddresses();
       }
+      _appUser!.addresses[index] = updatedAddress;
+      await _saveAddresses();
+    }
   }
 
   Future<void> deleteAddress(String addressId) async {
-     if (_firebaseUser == null) return;
-     _appUser?.addresses.removeWhere((addr) => addr.id == addressId);
+     if (_appUser == null) return;
+     _appUser!.addresses.removeWhere((addr) => addr.id == addressId);
      await _saveAddresses();
   }
 
   Future<void> _saveAddresses() async {
+    if (_firebaseUser == null || _appUser == null) return;
     await _firestore.collection('users').doc(_firebaseUser!.uid).update({
       'addresses': _appUser!.addresses.map((addr) => addr.toMap()).toList(),
     });
     notifyListeners();
+  }
+
+  // --- HELPERS ---
+
+  String _formatToE164(String input) {
+    if (input.startsWith('+')) return input;
+    String clean = input.replaceAll(RegExp(r'[^\d]'), '');
+    if (clean.startsWith('0')) clean = clean.substring(1);
+    if (!clean.startsWith('234')) clean = '234$clean';
+    return '+$clean';
   }
 }

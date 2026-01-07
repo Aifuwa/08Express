@@ -52,6 +52,9 @@ dependencies:
   flutter_local_notifications: ^19.5.0
   firebase_remote_config: ^6.1.2
   flutter_native_splash: ^2.4.7
+  smooth_page_indicator: ^2.0.1
+  shared_preferences: ^2.5.4
+  lottie: ^3.3.2
 
 
   
@@ -91,6 +94,9 @@ flutter:
   assets:
     - assets/logo.png
     - assets/default_profile.png
+    - lib/lottie/1.json
+    - lib/lottie/2.json
+    - lib/lottie/3.json
 
   # To add assets to your application, add an assets section, like this:
   # assets:
