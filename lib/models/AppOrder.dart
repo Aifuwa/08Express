@@ -1,6 +1,4 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
-// REMOVED: import 'package:eight_express/providers/cart_provider.dart'; 
-// ADDED: Import the explicit model file
 import 'package:eight_express/models/cart_item.dart'; 
 
 class AppOrder {
@@ -36,7 +34,8 @@ class AppOrder {
     }
 
     List<OrderItem> orderItems = [];
-    if (data['orderItems'] is List) {
+    // Matching the key 'orderItems' from toFirestore
+    if (data['orderItems'] != null && data['orderItems'] is List) {
       orderItems = (data['orderItems'] as List)
           .map((itemMap) => OrderItem.fromMap(itemMap as Map<String, dynamic>))
           .toList();
@@ -50,6 +49,7 @@ class AppOrder {
       shippingAddress: data['shippingAddress'] as String? ?? 'No Address',
       deliveryMethod: data['deliveryMethod'] as String? ?? 'delivery', 
       items: orderItems,
+      // FIX: Handle the null timestamp delay from FieldValue.serverTimestamp()
       orderDate: data['orderDate'] as Timestamp? ?? Timestamp.now(),
       status: data['status'] as String? ?? 'pending',
       receiptImageUrl: data['receiptImageUrl'] as String?,
@@ -86,7 +86,6 @@ class OrderItem {
     required this.quantity,
   });
 
-  // Now relies on the imported CartItem model
   factory OrderItem.fromCartItem(CartItem cartItem) {
     return OrderItem(
       productId: cartItem.productId,
@@ -100,6 +99,7 @@ class OrderItem {
   factory OrderItem.fromMap(Map<String, dynamic> data) {
     return OrderItem(
       productId: data['productId'] as String? ?? '',
+      // Support both 'productName' and 'name' keys
       name: data['productName'] as String? ?? data['name'] as String? ?? 'Unknown',
       price: (data['price'] as num?)?.toDouble() ?? 0.0,
       imageUrl: data['imageUrl'] as String? ?? '',

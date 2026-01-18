@@ -3,9 +3,9 @@ import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import 'package:eight_express/services/order_service.dart';
 import 'package:eight_express/models/AppOrder.dart';
+import 'package:eight_express/providers/user_provider.dart';
 import 'package:eight_express/screens/order_detail_screen.dart';
 import 'package:eight_express/screens/home_screen.dart';
-// ADDED: Import for your signature 08 loader
 import 'package:eight_express/widgets/custom_loader.dart';
 
 class MyOrdersScreen extends StatelessWidget {
@@ -14,6 +14,7 @@ class MyOrdersScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final orderService = Provider.of<OrderService>(context);
+    final userProv = Provider.of<UserProvider>(context);
     const Color primaryColor = Color(0xFFFE7F2D);
     const Color scaffoldBg = Color(0xFFF8F9FB);
 
@@ -21,27 +22,20 @@ class MyOrdersScreen extends StatelessWidget {
       backgroundColor: scaffoldBg,
       body: Stack(
         children: [
-          // 1. SOFT TOP DECORATION
           Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
+            top: 0, left: 0, right: 0,
             child: Container(
               height: 200,
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
-                  colors: [
-                    primaryColor.withOpacity(0.15),
-                    scaffoldBg,
-                  ],
+                  colors: [primaryColor.withOpacity(0.15), scaffoldBg],
                 ),
               ),
             ),
           ),
 
-          // 2. MAIN CONTENT
           CustomScrollView(
             physics: const BouncingScrollPhysics(),
             slivers: [
@@ -64,32 +58,61 @@ class MyOrdersScreen extends StatelessWidget {
                 ),
               ),
 
-              StreamBuilder<List<AppOrder>>(
-                stream: orderService.getUserOrders(),
-                builder: (context, snapshot) {
-                  // --- UPDATED: Using Custom 08 Loader ---
-                  if (snapshot.connectionState == ConnectionState.waiting) {
-                    return const SliverFillRemaining(
-                      child: Center(child: CustomLoader(size: 70)),
-                    );
-                  }
-                  
-                  if (!snapshot.hasData || snapshot.data!.isEmpty) {
-                    return SliverFillRemaining(child: _buildEmptyState(context, primaryColor));
-                  }
+              if (!userProv.isAuthenticated)
+                const SliverFillRemaining(
+                  child: Center(child: Text("Please login to see orders")),
+                )
+              else
+                StreamBuilder<List<AppOrder>>(
+                  stream: orderService.getUserOrders(),
+                  builder: (context, snapshot) {
+                    // FIX: Handle Errors (Stops the infinite spinner)
+                    if (snapshot.hasError) {
+                      return SliverFillRemaining(
+                        child: Center(
+                          child: Padding(
+                            padding: const EdgeInsets.all(30.0),
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                const Icon(Icons.error_outline, color: Colors.red, size: 40),
+                                const SizedBox(height: 10),
+                                Text(
+                                  "Database Error: ${snapshot.error}",
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(color: Colors.red, fontSize: 12),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      );
+                    }
 
-                  final orders = snapshot.data!;
-                  return SliverPadding(
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                    sliver: SliverList(
-                      delegate: SliverChildBuilderDelegate(
-                        (ctx, index) => _OrderCard(order: orders[index], primaryColor: primaryColor),
-                        childCount: orders.length,
+                    // 1. Loading state
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const SliverFillRemaining(
+                        child: Center(child: CustomLoader(size: 70)),
+                      );
+                    }
+                    
+                    // 2. Empty state
+                    if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                      return SliverFillRemaining(child: _buildEmptyState(context, primaryColor));
+                    }
+
+                    final orders = snapshot.data!;
+                    return SliverPadding(
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                      sliver: SliverList(
+                        delegate: SliverChildBuilderDelegate(
+                          (ctx, index) => _OrderCard(order: orders[index], primaryColor: primaryColor),
+                          childCount: orders.length,
+                        ),
                       ),
-                    ),
-                  );
-                },
-              ),
+                    );
+                  },
+                ),
               const SliverToBoxAdapter(child: SizedBox(height: 50)),
             ],
           ),
@@ -107,11 +130,12 @@ class MyOrdersScreen extends StatelessWidget {
             'https://cdn-icons-png.flaticon.com/512/3500/3500833.png',
             height: 180,
             color: color.withOpacity(0.2),
+            errorBuilder: (context, error, stackTrace) => Icon(Icons.shopping_bag_outlined, size: 100, color: color.withOpacity(0.2)),
           ),
           const SizedBox(height: 20),
           const Text("No orders yet", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.black87)),
           const SizedBox(height: 10),
-          const Text("Hungry? Your next meal is a click away!", style: TextStyle(color: Colors.grey)),
+          const Text("Your shopping history will appear here!", style: TextStyle(color: Colors.grey)),
           const SizedBox(height: 30),
           ElevatedButton(
             onPressed: () => Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const HomeScreen())),
@@ -132,7 +156,6 @@ class MyOrdersScreen extends StatelessWidget {
 class _OrderCard extends StatelessWidget {
   final AppOrder order;
   final Color primaryColor;
-
   const _OrderCard({required this.order, required this.primaryColor});
 
   @override
@@ -145,13 +168,7 @@ class _OrderCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(24),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.03),
-            blurRadius: 20,
-            offset: const Offset(0, 10),
-          ),
-        ],
+        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 20, offset: const Offset(0, 10))],
       ),
       child: Material(
         color: Colors.transparent,
@@ -168,70 +185,41 @@ class _OrderCard extends StatelessWidget {
                       clipBehavior: Clip.none,
                       children: [
                         Container(
-                          width: 75,
-                          height: 75,
+                          width: 75, height: 75,
                           decoration: BoxDecoration(
                             borderRadius: BorderRadius.circular(18),
                             color: Colors.grey[50],
-                            image: previewImage != null
-                                ? DecorationImage(image: NetworkImage(previewImage), fit: BoxFit.cover)
-                                : null,
+                            image: previewImage != null ? DecorationImage(image: NetworkImage(previewImage), fit: BoxFit.cover) : null,
                           ),
-                          child: previewImage == null ? const Icon(Icons.restaurant, color: Colors.grey) : null,
                         ),
                         if (order.items.length > 1)
                           Positioned(
-                            bottom: -5,
-                            right: -5,
+                            bottom: -5, right: -5,
                             child: Container(
                               padding: const EdgeInsets.all(6),
-                              decoration: BoxDecoration(
-                                color: primaryColor,
-                                shape: BoxShape.circle,
-                                border: Border.all(color: Colors.white, width: 2),
-                              ),
-                              child: Text(
-                                "+${order.items.length - 1}",
-                                style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
-                              ),
+                              decoration: BoxDecoration(color: primaryColor, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 2)),
+                              child: Text("+${order.items.length - 1}", style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
                             ),
                           ),
                       ],
                     ),
                     const SizedBox(width: 16),
-                    
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(
-                            "Order #${order.id.substring(0, 6).toUpperCase()}",
-                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                          ),
+                          Text("Order #${order.id.length > 6 ? order.id.substring(0, 6).toUpperCase() : order.id.toUpperCase()}", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                           const SizedBox(height: 4),
-                          Text(
-                            DateFormat('MMM dd, yyyy • hh:mm a').format(order.orderDate.toDate()),
-                            style: TextStyle(color: Colors.grey.shade500, fontSize: 12),
-                          ),
+                          Text(DateFormat('MMM dd, yyyy • hh:mm a').format(order.orderDate.toDate()), style: TextStyle(color: Colors.grey.shade500, fontSize: 12)),
                           const SizedBox(height: 12),
-                          
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                            decoration: BoxDecoration(
-                              color: status.color.withOpacity(0.1),
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(status.icon, size: 14, color: status.color),
-                                const SizedBox(width: 6),
-                                Text(
-                                  status.label,
-                                  style: TextStyle(color: status.color, fontSize: 11, fontWeight: FontWeight.w900),
-                                ),
-                              ],
-                            ),
+                            decoration: BoxDecoration(color: status.color.withOpacity(0.1), borderRadius: BorderRadius.circular(12)),
+                            child: Row(mainAxisSize: MainAxisSize.min, children: [
+                              Icon(status.icon, size: 14, color: status.color),
+                              const SizedBox(width: 6),
+                              Text(status.label, style: TextStyle(color: status.color, fontSize: 11, fontWeight: FontWeight.w900)),
+                            ]),
                           ),
                         ],
                       ),
@@ -239,33 +227,17 @@ class _OrderCard extends StatelessWidget {
                   ],
                 ),
               ),
-
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade50.withOpacity(0.5),
-                  borderRadius: const BorderRadius.vertical(bottom: Radius.circular(24)),
-                ),
+                decoration: BoxDecoration(color: Colors.grey.shade50.withOpacity(0.5), borderRadius: const BorderRadius.vertical(bottom: Radius.circular(24))),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text("TOTAL AMOUNT", style: TextStyle(color: Colors.grey.shade400, fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 0.5)),
-                        Text(
-                          '₦${order.totalAmount.toStringAsFixed(2)}',
-                          style: TextStyle(color: primaryColor, fontWeight: FontWeight.w900, fontSize: 18),
-                        ),
-                      ],
-                    ),
-                    Row(
-                      children: [
-                        const Text("View Details", style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.black54)),
-                        const SizedBox(width: 5),
-                        Icon(Icons.arrow_forward_ios_rounded, size: 14, color: Colors.grey.shade400),
-                      ],
-                    )
+                    Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text("TOTAL AMOUNT", style: TextStyle(color: Colors.grey.shade400, fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 0.5)),
+                      Text('₦${order.totalAmount.toStringAsFixed(2)}', style: TextStyle(color: primaryColor, fontWeight: FontWeight.w900, fontSize: 18)),
+                    ]),
+                    Row(children: [const Text("View Details", style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.black54)), const SizedBox(width: 5), Icon(Icons.arrow_forward_ios_rounded, size: 14, color: Colors.grey)]),
                   ],
                 ),
               ),
@@ -277,15 +249,11 @@ class _OrderCard extends StatelessWidget {
   }
 
   _StatusInfo _getStatusDetails(String status) {
-    if (status.toLowerCase().contains('delivered')) {
-      return _StatusInfo(Icons.check_circle_rounded, Colors.green, "DELIVERED");
-    } else if (status.toLowerCase().contains('shipped') || status.toLowerCase().contains('way')) {
-      return _StatusInfo(Icons.local_shipping_rounded, Colors.blue, "ON THE WAY");
-    } else if (status.toLowerCase().contains('pending') || status.toLowerCase().contains('processing')) {
-      return _StatusInfo(Icons.timer_rounded, Colors.orange, "PROCESSING");
-    } else if (status.toLowerCase().contains('cancelled')) {
-      return _StatusInfo(Icons.cancel_rounded, Colors.red, "CANCELLED");
-    }
+    final s = status.toLowerCase();
+    if (s.contains('delivered')) return _StatusInfo(Icons.check_circle_rounded, Colors.green, "DELIVERED");
+    if (s.contains('shipped') || s.contains('way')) return _StatusInfo(Icons.local_shipping_rounded, Colors.blue, "ON THE WAY");
+    if (s.contains('pending') || s.contains('processing')) return _StatusInfo(Icons.timer_rounded, Colors.orange, "PROCESSING");
+    if (s.contains('cancelled')) return _StatusInfo(Icons.cancel_rounded, Colors.red, "CANCELLED");
     return _StatusInfo(Icons.help_rounded, Colors.grey, status.toUpperCase());
   }
 }

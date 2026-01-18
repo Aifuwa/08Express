@@ -51,6 +51,7 @@ class AppUser {
   String? imageUrl; 
   String? phoneNumber; 
   bool isAdmin; 
+  bool setupComplete; 
   List<UserAddress> addresses;
   List<String> wishlist; 
 
@@ -61,6 +62,7 @@ class AppUser {
     this.imageUrl,
     this.phoneNumber,
     this.isAdmin = false,
+    this.setupComplete = false,
     List<UserAddress>? addresses,
     List<String>? wishlist,
   })  : addresses = addresses ?? [],
@@ -68,19 +70,22 @@ class AppUser {
 
   factory AppUser.fromFirestore(DocumentSnapshot doc) {
     Map<String, dynamic> data = doc.data() as Map<String, dynamic>? ?? {};
+    
     List<UserAddress> loadedAddresses = [];
     if (data['addresses'] is List) {
       loadedAddresses = (data['addresses'] as List)
           .map((addressMap) => UserAddress.fromMap(addressMap as Map<String, dynamic>))
           .toList();
     }
+
     return AppUser(
       uid: doc.id,
-      email: data['email'] as String?,
+      email: data['email'] as String?, 
       name: data['name'] as String?,
       imageUrl: data['imageUrl'] as String?,
       phoneNumber: data['phoneNumber'] as String?,
       isAdmin: data['isAdmin'] as bool? ?? false,
+      setupComplete: data['setupComplete'] as bool? ?? false,
       addresses: loadedAddresses,
       wishlist: List<String>.from(data['wishlist'] ?? []),
     );
@@ -93,9 +98,10 @@ class AppUser {
       'imageUrl': imageUrl,
       'phoneNumber': phoneNumber,
       'isAdmin': isAdmin,
+      'setupComplete': setupComplete,
       'addresses': addresses.map((addr) => addr.toMap()).toList(), 
       'wishlist': wishlist,
-      'updatedAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(), // Necessary for Firestore Rules whitelist
     };
   }
 }

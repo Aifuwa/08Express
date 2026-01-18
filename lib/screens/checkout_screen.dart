@@ -11,14 +11,13 @@ import 'package:provider/provider.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:logger/logger.dart';
 
-// Imports
 import 'package:eight_express/providers/cart_provider.dart';
 import 'package:eight_express/providers/user_provider.dart';
 import 'package:eight_express/screens/home_screen.dart';
 import 'package:eight_express/screens/user_addresses_screen.dart';
 import 'package:eight_express/models/app_user.dart';
-// ADDED: Import for your signature 08 loader
 import 'package:eight_express/widgets/custom_loader.dart';
+import 'package:eight_express/services/remote_config_service.dart';
 
 final _logger = Logger(
   printer: PrettyPrinter(methodCount: 0, colors: true, printEmojis: true),
@@ -68,8 +67,6 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       }
     });
   }
-
-  // --- LOGIC ---
 
   String _getDeliveryEstimate() {
     DateTime orderDate = DateTime.now();
@@ -121,33 +118,17 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 
   double _calculateDeliveryFee(CartProvider cart) {
     if (_selectedDeliveryMethod == DeliveryMethod.pickup) return 0.0;
+    
+    final config = RemoteConfigService.delivery;
     int totalItems = _getTotalItemCount(cart);
-    return totalItems <= 50 ? 3000.0 : 5000.0;
+    int threshold = config['threshold_items'] ?? 50;
+    double standard = (config['standard_fee'] ?? 3000).toDouble();
+    double large = (config['large_fee'] ?? 5000).toDouble();
+
+    return totalItems <= threshold ? standard : large;
   }
 
-  Future<String?> _uploadReceiptImage() async {
-    if (_pickedReceiptImage == null) {
-      if (mounted) setState(() => _uploadMessage = '⚠ Please attach your payment receipt.');
-      return null;
-    }
-
-    setState(() {
-      _isUploading = true;
-      _uploadMessage = 'Uploading receipt...';
-    });
-
-    try {
-      final String fileName = 'receipts/${DateTime.now().millisecondsSinceEpoch}_${_pickedReceiptImage!.path.split('/').last}';
-      final Reference storageRef = FirebaseStorage.instance.ref().child(fileName);
-      final UploadTask uploadTask = storageRef.putFile(_pickedReceiptImage!);
-      final TaskSnapshot snapshot = await uploadTask;
-      return await snapshot.ref.getDownloadURL();
-    } on FirebaseException catch (e) {
-      if (mounted) setState(() => _uploadMessage = 'Error: ${e.message}');
-      return null;
-    } 
-  }
-
+  // INTELLIGENT ORDER PLACEMENT Logic
   Future<void> _placeOrder() async {
     final cartProvider = Provider.of<CartProvider>(context, listen: false);
 
@@ -166,17 +147,24 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       return;
     }
 
-    setState(() => _isUploading = true);
-
-    final receiptImageUrl = await _uploadReceiptImage();
-    if (receiptImageUrl == null) {
-      setState(() => _isUploading = false);
+    if (_pickedReceiptImage == null) {
+      setState(() => _uploadMessage = '⚠ Please attach your payment receipt.');
       return;
     }
 
-    if (!mounted) return;
+    setState(() => _isUploading = true);
 
     try {
+      // 1. Upload Receipt to Firebase Storage
+      final String fileName = 'receipts/${DateTime.now().millisecondsSinceEpoch}_${_pickedReceiptImage!.path.split('/').last}';
+      final Reference storageRef = FirebaseStorage.instance.ref().child(fileName);
+      final UploadTask uploadTask = storageRef.putFile(_pickedReceiptImage!);
+      final TaskSnapshot snapshot = await uploadTask;
+      final String receiptImageUrl = await snapshot.ref.getDownloadURL();
+
+      if (!mounted) return;
+
+      // 2. Calculate Totals
       final double deliveryFee = _calculateDeliveryFee(cartProvider);
       final double grandTotal = widget.totalAmount + deliveryFee;
 
@@ -190,23 +178,32 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 
       String shippingAddress;
       if (_selectedDeliveryMethod == DeliveryMethod.pickup) {
-        shippingAddress = "STORE PICKUP";
+        shippingAddress = "STORE PICKUP: #08Vic Enterprise HQ";
       } else {
         final addr = _selectedUserAddress!;
         shippingAddress = "${addr.street}, ${addr.city}, ${addr.state} ${addr.zipCode}, ${addr.country}";
       }
 
+      // 3. Save Order with Tracker Metadata
+      final String method = _selectedDeliveryMethod.toString().split('.').last; // "pickup" or "delivery"
+
       await FirebaseFirestore.instance.collection('orders').add({
         'userId': currentUser.uid,
-        'status': 'pending_receipt_verification',
+        'status': 'pending_receipt_verification', // Initial status
         'orderDate': Timestamp.now(),
         'subtotal': widget.totalAmount,
         'deliveryFee': deliveryFee,
         'totalAmount': grandTotal,
-        'deliveryMethod': _selectedDeliveryMethod.toString().split('.').last,
+        'deliveryMethod': method,
         'shippingAddress': shippingAddress,
         'receiptImageUrl': receiptImageUrl,
         'orderItems': orderItems,
+        // Meta-data for the tracker to work intelligently
+        'trackingMilestones': method == 'pickup' 
+            ? ['Order Placed', 'Payment Verified', 'Processing', 'Ready for Pickup', 'Collected']
+            : ['Order Placed', 'Payment Verified', 'Processing', 'In Transit', 'Delivered'],
+        'currentStep': 0, 
+        'estimatedCompletion': _getDeliveryEstimate(),
       });
 
       cartProvider.clearCart();
@@ -218,8 +215,9 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       }
     } catch (e) {
       _logger.e(e);
-      if (mounted) setState(() => _uploadMessage = 'Failed to place order.');
+      if (mounted) setState(() => _uploadMessage = 'Failed to place order. Check connection.');
     } finally {
+      // FIX: processing loader finally stops here
       if (mounted) setState(() => _isUploading = false);
     }
   }
@@ -233,6 +231,8 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     final double deliveryFee = _calculateDeliveryFee(cart);
     final double grandTotal = widget.totalAmount + deliveryFee;
     final String deliveryText = _getDeliveryEstimate();
+    
+    final bank = RemoteConfigService.bank;
 
     return Scaffold(
       backgroundColor: Colors.grey[100],
@@ -368,10 +368,11 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                 const SizedBox(height: 30),
                 const StepHeader(number: "1", title: "Make Bank Transfer"),
                 const SizedBox(height: 10),
+                
                 BankDetailsCard(
-                  bankName: 'Moniepoint',
-                  accountNumber: '5449707683',
-                  accountName: '#08Vic Enterprise',
+                  bankName: bank['bank_name'] ?? 'Moniepoint',
+                  accountNumber: bank['account_number'] ?? '5449707683',
+                  accountName: bank['account_name'] ?? '#08Vic Enterprise',
                   onCopy: _copyToClipboard,
                 ),
 
@@ -414,7 +415,6 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 
                 const SizedBox(height: 40),
 
-                // --- CONFIRM BUTTON WITH CUSTOM LOADER ---
                 SizedBox(
                   width: double.infinity,
                   height: 55,
@@ -425,7 +425,6 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                     ),
                     child: _isUploading
-                        // --- UPDATED: Using signature 08 loader inside the button ---
                         ? const CustomLoader(size: 40) 
                         : const Text('CONFIRM PAYMENT', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
                   ),
@@ -438,8 +437,6 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
       ),
     );
   }
-
-  // --- WIDGET BUILDERS ---
 
   Widget _buildModernRadioTile({
     required DeliveryMethod value,

@@ -51,8 +51,8 @@ class DefaultFirebaseOptions {
   );
 
   static const FirebaseOptions android = FirebaseOptions(
-    apiKey: 'AIzaSyBbb76sL3MjqY5j9L259-wY2yefyQsGPXQ',
-    appId: '1:595680431417:android:a8a3244469c51c7b66ece8',
+    apiKey: 'AIzaSyCsQFIP0gSEtbHdYeZYuhQP-7ZCCuBoAC0',
+    appId: '1:595680431417:android:b731f33230d13f9466ece8',
     messagingSenderId: '595680431417',
     projectId: 'express-74087',
     storageBucket: 'express-74087.firebasestorage.app',
@@ -60,19 +60,22 @@ class DefaultFirebaseOptions {
 
   static const FirebaseOptions ios = FirebaseOptions(
     apiKey: 'AIzaSyC9KDKzqlu51-aEsohswW2oHKB9uKoo76g',
-    appId: '1:595680431417:ios:18b8b9245d04c17866ece8',
+    appId: '1:595680431417:ios:60e2397011e5ed5566ece8',
     messagingSenderId: '595680431417',
     projectId: 'express-74087',
     storageBucket: 'express-74087.firebasestorage.app',
-    iosBundleId: 'com.example.eightExpress',
+    androidClientId: '595680431417-i5j3jqs7ehr1kqjrvvh9cirmr58a5goi.apps.googleusercontent.com',
+    iosBundleId: 'com.eightexpress.app',
   );
 
   static const FirebaseOptions macos = FirebaseOptions(
     apiKey: 'AIzaSyC9KDKzqlu51-aEsohswW2oHKB9uKoo76g',
-    appId: '1:595680431417:ios:18b8b9245d04c17866ece8',
+    appId: '1:595680431417:ios:eaf9ff026a0f6cad66ece8',
     messagingSenderId: '595680431417',
     projectId: 'express-74087',
     storageBucket: 'express-74087.firebasestorage.app',
+    androidClientId: '595680431417-i5j3jqs7ehr1kqjrvvh9cirmr58a5goi.apps.googleusercontent.com',
+    iosClientId: '595680431417-5bkk4u8sss6dn6vl2f0sm20usqjje4h7.apps.googleusercontent.com',
     iosBundleId: 'com.example.eightExpress',
   );
 
@@ -85,4 +88,5 @@ class DefaultFirebaseOptions {
     storageBucket: 'express-74087.firebasestorage.app',
     measurementId: 'G-6X3MXX70J8',
   );
+
 }

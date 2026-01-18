@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:eight_express/providers/cart_provider.dart';
-import 'package:eight_express/providers/wishlist_provider.dart';
+import 'package:eight_express/providers/user_provider.dart';
 import 'package:eight_express/screens/checkout_screen.dart';
 import 'package:eight_express/models/product.dart';
 import 'package:eight_express/models/cart_item.dart';
@@ -15,19 +15,20 @@ class CartScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cart = Provider.of<CartProvider>(context);
-    final wishlist = Provider.of<WishlistProvider>(context);
+    final userProv = Provider.of<UserProvider>(context);
+    
+    // 1. Get the IDs from the User's profile in the database
+    final List<String> wishlistIds = userProv.appUser?.wishlist ?? [];
     
     const Color orangeColor = Color(0xFFFE7F2D);
-    const Color backgroundColor = Color(0xFFF4F7F9); // Slightly softer grey
+    const Color backgroundColor = Color(0xFFF4F7F9); 
 
     return Scaffold(
       backgroundColor: backgroundColor,
       body: Column(
         children: [
-          // 1. CLEAN HEADER
           _buildHeader(context),
 
-          // 2. SCROLLABLE CONTENT
           Expanded(
             child: CustomScrollView(
               physics: const BouncingScrollPhysics(),
@@ -49,40 +50,53 @@ class CartScreen extends StatelessWidget {
                 else
                   SliverToBoxAdapter(child: _buildEmptyCartState(context)),
 
-                // --- CLEAR DEMARCATION BAR ---
-                if (wishlist.items.isNotEmpty)
-                  SliverToBoxAdapter(
-                    child: _buildSectionDivider(wishlist.itemCount),
-                  ),
+                // --- NEW DYNAMIC WISHLIST SECTION ---
+                // We use a StreamBuilder to fetch ONLY the products in the user's wishlist
+                if (wishlistIds.isNotEmpty)
+                  StreamBuilder<QuerySnapshot>(
+                    stream: FirebaseFirestore.instance
+                        .collection('products')
+                        .where(FieldPath.documentId, whereIn: wishlistIds.take(10).toList()) // Fetch up to 10 items
+                        .snapshots(),
+                    builder: (context, snapshot) {
+                      if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                        return const SliverToBoxAdapter(child: SizedBox.shrink());
+                      }
 
-                // SECTION: WISHLIST GRID
-                if (wishlist.items.isNotEmpty)
-                  SliverPadding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    sliver: SliverGrid(
-                      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: 2,
-                        childAspectRatio: 0.64,
-                        crossAxisSpacing: 14,
-                        mainAxisSpacing: 14,
-                      ),
-                      delegate: SliverChildBuilderDelegate(
-                        (ctx, i) => _WishlistItemSmallCard(
-                          product: wishlist.items.values.elementAt(i),
-                        ),
-                        childCount: wishlist.itemCount,
-                      ),
-                    ),
+                      final wishItems = snapshot.data!.docs
+                          .map((doc) => Product.fromFirestore(doc))
+                          .toList();
+
+                      return SliverMainAxisGroup(
+                        slivers: [
+                          SliverToBoxAdapter(child: _buildSectionDivider(wishItems.length)),
+                          SliverPadding(
+                            padding: const EdgeInsets.symmetric(horizontal: 16),
+                            sliver: SliverGrid(
+                              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: 2,
+                                childAspectRatio: 0.64,
+                                crossAxisSpacing: 14,
+                                mainAxisSpacing: 14,
+                              ),
+                              delegate: SliverChildBuilderDelegate(
+                                (ctx, i) => _WishlistItemSmallCard(product: wishItems[i]),
+                                childCount: wishItems.length,
+                              ),
+                            ),
+                          ),
+                        ],
+                      );
+                    },
                   ),
                 
-                const SliverToBoxAdapter(child: SizedBox(height: 120)), 
+                const SliverToBoxAdapter(child: SizedBox(height: 140)), 
               ],
             ),
           ),
         ],
       ),
       
-      // 3. PERSISTENT CHECKOUT BAR
       bottomSheet: cart.items.isNotEmpty 
           ? _buildCheckoutSummary(context, cart, orangeColor) 
           : null,
@@ -103,16 +117,11 @@ class CartScreen extends StatelessWidget {
     );
   }
 
-  // --- THE NEW BEAUTIFUL SECTION DIVIDER ---
   Widget _buildSectionDivider(int count) {
     return Column(
       children: [
         const SizedBox(height: 20),
-        Container(
-          height: 8, // Thick demarcation like Amazon
-          width: double.infinity,
-          color: Colors.grey.withOpacity(0.1),
-        ),
+        Container(height: 8, width: double.infinity, color: Colors.grey.withOpacity(0.1)),
         Container(
           color: Colors.white,
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
@@ -120,10 +129,7 @@ class CartScreen extends StatelessWidget {
             children: [
               const Icon(Icons.favorite, color: Colors.redAccent, size: 22),
               const SizedBox(width: 10),
-              const Text(
-                "From your Wishlist",
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87),
-              ),
+              const Text("From your Wishlist", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.black87)),
               const Spacer(),
               Text("$count items", style: const TextStyle(color: Colors.grey, fontSize: 13)),
             ],
@@ -133,10 +139,9 @@ class CartScreen extends StatelessWidget {
     );
   }
 
-  // --- BEAUTIFUL EMPTY STATE BUTTON ---
   Widget _buildEmptyCartState(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.only(top: 60, bottom: 20),
+      padding: const EdgeInsets.only(top: 80, bottom: 20),
       child: Column(
         children: [
           Icon(Icons.shopping_cart_outlined, size: 80, color: Colors.grey[300]),
@@ -144,7 +149,7 @@ class CartScreen extends StatelessWidget {
           const Text('Your cart is empty', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.black54)),
           const SizedBox(height: 30),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 50),
+            padding: const EdgeInsets.symmetric(horizontal: 60),
             child: InkWell(
               onTap: () => Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const HomeScreen())),
               child: Container(
@@ -152,11 +157,8 @@ class CartScreen extends StatelessWidget {
                 decoration: BoxDecoration(
                   gradient: const LinearGradient(colors: [Color(0xFFFE7F2D), Color(0xFFFFB347)]),
                   borderRadius: BorderRadius.circular(25),
-                  boxShadow: [BoxShadow(color: const Color(0xFFFE7F2D).withOpacity(0.3), blurRadius: 10, offset: const Offset(0, 5))],
                 ),
-                child: const Center(
-                  child: Text("START SHOPPING", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, letterSpacing: 1)),
-                ),
+                child: const Center(child: Text("START SHOPPING", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
               ),
             ),
           ),
@@ -189,11 +191,7 @@ class CartScreen extends StatelessWidget {
             height: 55,
             child: ElevatedButton(
               onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => CheckoutScreen(totalAmount: cart.totalAmount))),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: primaryColor,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-                elevation: 0,
-              ),
+              style: ElevatedButton.styleFrom(backgroundColor: primaryColor, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15))),
               child: const Text("CHECKOUT NOW", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white)),
             ),
           ),
@@ -210,23 +208,14 @@ class _WishlistItemSmallCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cart = Provider.of<CartProvider>(context, listen: false);
-    final wishlist = Provider.of<WishlistProvider>(context, listen: false);
+    final userProv = Provider.of<UserProvider>(context, listen: false);
 
     return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 10)],
-      ),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 10)]),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
-            child: ClipRRect(
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-              child: CachedNetworkImage(imageUrl: product.imageUrl, fit: BoxFit.cover, width: double.infinity),
-            ),
-          ),
+          Expanded(child: ClipRRect(borderRadius: const BorderRadius.vertical(top: Radius.circular(20)), child: CachedNetworkImage(imageUrl: product.imageUrl, fit: BoxFit.cover, width: double.infinity))),
           Padding(
             padding: const EdgeInsets.all(12),
             child: Column(
@@ -242,16 +231,10 @@ class _WishlistItemSmallCard extends StatelessWidget {
                   child: ElevatedButton(
                     onPressed: () {
                       cart.addItem(product);
-                      wishlist.toggleWishlist(product); 
-                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Moved to cart"), behavior: SnackBarBehavior.floating, duration: Duration(milliseconds: 800)));
+                      userProv.toggleWishlist(product.id); // Moves from wishlist to cart in DB
                     },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.black,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                      elevation: 0,
-                      padding: EdgeInsets.zero,
-                    ),
-                    child: const Text("Add", style: TextStyle(fontSize: 12, color: Colors.white, fontWeight: FontWeight.bold)),
+                    style: ElevatedButton.styleFrom(backgroundColor: Colors.black, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+                    child: const Text("Add", style: TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.bold)),
                   ),
                 )
               ],
@@ -266,27 +249,18 @@ class _WishlistItemSmallCard extends StatelessWidget {
 class CartItemCard extends StatelessWidget {
   final String productId;
   final CartItem cartItem;
-
   const CartItemCard({super.key, required this.productId, required this.cartItem});
 
   @override
   Widget build(BuildContext context) {
     final cart = Provider.of<CartProvider>(context, listen: false);
-
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 10, offset: const Offset(0, 4))],
-      ),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 10)]),
       child: Row(
         children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(15),
-            child: CachedNetworkImage(imageUrl: cartItem.imageUrl, width: 80, height: 80, fit: BoxFit.cover),
-          ),
+          ClipRRect(borderRadius: BorderRadius.circular(15), child: CachedNetworkImage(imageUrl: cartItem.imageUrl, width: 80, height: 80, fit: BoxFit.cover)),
           const SizedBox(width: 15),
           Expanded(
             child: Column(
@@ -300,14 +274,8 @@ class CartItemCard extends StatelessWidget {
           ),
           Column(
             children: [
-              _qtyBtn(Icons.add, () => cart.addItem(Product(
-                id: cartItem.productId, name: cartItem.name, price: cartItem.price, imageUrl: cartItem.imageUrl,
-                description: '', category: '', stock: 99, createdAt: Timestamp.now()
-              )), isMain: true),
-              Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                child: Text('${cartItem.quantity}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-              ),
+              _qtyBtn(Icons.add, () => cart.addItem(Product(id: cartItem.productId, name: cartItem.name, price: cartItem.price, imageUrl: cartItem.imageUrl, description: '', category: '', stock: 99, createdAt: Timestamp.now())), isMain: true),
+              Padding(padding: const EdgeInsets.symmetric(vertical: 8), child: Text('${cartItem.quantity}', style: const TextStyle(fontWeight: FontWeight.bold))),
               _qtyBtn(Icons.remove, () => cart.removeSingleItem(productId), isMain: false),
             ],
           )
@@ -320,10 +288,7 @@ class CartItemCard extends StatelessWidget {
     onTap: onTap,
     child: Container(
       padding: const EdgeInsets.all(6),
-      decoration: BoxDecoration(
-        color: isMain ? const Color(0xFFFE7F2D) : Colors.grey[100], 
-        borderRadius: BorderRadius.circular(10)
-      ),
+      decoration: BoxDecoration(color: isMain ? const Color(0xFFFE7F2D) : Colors.grey[100], borderRadius: BorderRadius.circular(10)),
       child: Icon(icon, size: 16, color: isMain ? Colors.white : Colors.black),
     ),
   );

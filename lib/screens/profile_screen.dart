@@ -1,3 +1,4 @@
+// lib/screens/profile_screen.dart
 import 'dart:io';
 import 'package:eight_express/widgets/custom_loader.dart';
 import 'package:flutter/material.dart';
@@ -13,6 +14,7 @@ import 'package:eight_express/screens/my_orders_screen.dart';
 import 'package:eight_express/screens/home_screen.dart';
 import 'package:eight_express/screens/auth_screen.dart';
 import 'package:eight_express/constants/legal_texts.dart';
+import 'package:eight_express/services/remote_config_service.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -27,7 +29,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   bool _isEditing = false;
   bool _isLoadingImage = false;
-  final Color primaryColor = const Color(0xFFFE7F2D);
+  
+  Color get primaryColor => RemoteConfigService.getPrimaryColor();
 
   @override
   void initState() {
@@ -37,30 +40,42 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _phoneNumberController.text = userProvider.appUser?.phoneNumber ?? '';
   }
 
-  // --- LOGOUT CONFIRMATION ---
+  // --- LOGOUT CONFIRMATION DIALOG ---
   void _showLogoutDialog() {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text("Log Out"),
-        content: const Text("Are you sure you want to leave? Your cart items will be saved."),
+        title: const Row(
+          children: [
+            Icon(Icons.logout, color: Colors.red),
+            SizedBox(width: 10),
+            Text("Log Out"),
+          ],
+        ),
+        content: const Text("Are you sure you want to log out? You will need to sign in again to access your orders and saved addresses."),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Stay")),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx), 
+            child: const Text("STAY", style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold)),
+          ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
             onPressed: () async {
-              Navigator.pop(ctx);
+              Navigator.pop(ctx); // Close dialog first
               await Provider.of<UserProvider>(context, listen: false).signOut();
+              // AuthWrapper handles the redirection to AuthScreen automatically
             },
-            child: const Text("Log Out", style: TextStyle(color: Colors.white)),
+            child: const Text("LOG OUT", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
           ),
         ],
       ),
     );
   }
 
-  // --- DELETE ACCOUNT (WITH STRONG WARNING) ---
   void _showDeleteAccountDialog() {
     final TextEditingController passwordController = TextEditingController();
     bool isDeleting = false;
@@ -86,7 +101,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 textAlign: TextAlign.center,
                 style: TextStyle(color: Colors.black87, fontSize: 14, height: 1.4),
               ),
-              const SizedBox(height: 7),
+              const SizedBox(height: 15),
               if (!isDeleting) ...[
                 TextField(
                   controller: passwordController,
@@ -101,7 +116,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 const CustomLoader(size: 50),
                 const SizedBox(height: 15),
                 const Text(
-                  "Please give us some time to securely process your request and delete your account data from our systems...",
+                  "Processing deletion...",
                   textAlign: TextAlign.center,
                   style: TextStyle(color: Colors.blueGrey, fontSize: 13, fontStyle: FontStyle.italic),
                 ),
@@ -121,7 +136,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     if (mounted) Navigator.of(context).pushAndRemoveUntil(MaterialPageRoute(builder: (context) => const AuthScreen()), (route) => false);
                   } catch (e) {
                     setDialogState(() => isDeleting = false);
-                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: Incorrect Password"), backgroundColor: Colors.red));
+                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Error: Incorrect Password"), backgroundColor: Colors.red));
                   }
                 },
                 child: const Text("Delete Forever", style: TextStyle(color: Colors.white)),
@@ -133,7 +148,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  // --- CHANGE PASSWORD (WITH CONFIRMATION) ---
   void _showChangePasswordDialog() {
     final TextEditingController currentPass = TextEditingController();
     final TextEditingController newPass = TextEditingController();
@@ -203,7 +217,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  // --- LEGAL MODALS (WORD-FOR-WORD) ---
   void _showPrivacyPolicy() => _showLegalBottomSheet("Privacy Policy", LegalTexts.privacyPolicy);
   void _showTermsAndConditions() => _showLegalBottomSheet("Terms & Conditions", LegalTexts.termsAndConditions);
   void _showRefundPolicy() => _showLegalBottomSheet("Refund & Return Policy", LegalTexts.refundPolicy);
@@ -283,7 +296,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 const SizedBox(height: 10),
                 if (!_isEditing) ...[
                   Text(appUser.name ?? "User", style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white)),
-                  Text(appUser.email ?? "", style: TextStyle(color: Colors.white.withOpacity(0.8))),
+                  Text(appUser.email ?? "", style: TextStyle(color: Colors.white.withOpacity(0.9))),
                 ]
               ]),
             ),
@@ -317,7 +330,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               child: SizedBox(
                 width: double.infinity,
                 child: OutlinedButton.icon(
-                  onPressed: _showLogoutDialog,
+                  onPressed: _showLogoutDialog, // Correctly linked to the confirmation dialog
                   icon: const Icon(Icons.logout),
                   label: const Text("Log Out"),
                   style: OutlinedButton.styleFrom(foregroundColor: Colors.red, padding: const EdgeInsets.all(15), side: const BorderSide(color: Colors.red), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15))),
@@ -331,7 +344,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  // --- HELPER WIDGETS ---
   Widget _buildLoggedOutState() {
     return Container(
       width: double.infinity, padding: const EdgeInsets.all(30),
@@ -385,8 +397,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   void _showContactUs() {
-    const String supportEmail = "admin@08vicenterprises.com";
-    const String supportPhone = "+2348100172239";
+    final support = RemoteConfigService.support;
+    final String supportEmail = support['email'] ?? "admin@08vicenterprises.com";
+    final String supportPhone = support['phone'] ?? "+2348100172239";
+
     showModalBottomSheet(context: context, isScrollControlled: true, backgroundColor: Colors.transparent, builder: (ctx) => Container(
       decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(30))),
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
@@ -430,7 +444,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Widget _buildField(TextEditingController c, String l, IconData i, [TextInputType t = TextInputType.text]) => TextField(controller: c, keyboardType: t, decoration: InputDecoration(labelText: l, prefixIcon: Icon(i, color: primaryColor), border: OutlineInputBorder(borderRadius: BorderRadius.circular(12))));
   Widget _buildSectionLabel(String text) => Padding(padding: const EdgeInsets.symmetric(horizontal: 25, vertical: 8), child: Align(alignment: Alignment.centerLeft, child: Text(text, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold))));
   Widget _buildCard(List<Widget> children) => Container(margin: const EdgeInsets.symmetric(horizontal: 20), decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10)]), child: Column(children: children));
-  Widget _buildTile(IconData i, Color c, String t, VoidCallback onTap) => ListTile(onTap: onTap, leading: Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: c.withOpacity(0.1), borderRadius: BorderRadius.circular(10)), child: Icon(i, color: c, size: 20)), title: Text(t, style: const TextStyle(fontWeight: FontWeight.w600)), trailing: const Icon(Icons.arrow_forward_ios, size: 14));
+  Widget _buildTile(IconsData, Color c, String t, VoidCallback onTap) => ListTile(onTap: onTap, leading: Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: c.withOpacity(0.1), borderRadius: BorderRadius.circular(10)), child: Icon(IconsData, color: c, size: 20)), title: Text(t, style: const TextStyle(fontWeight: FontWeight.w600)), trailing: const Icon(Icons.arrow_forward_ios, size: 14));
   Widget _buildDivider() => Divider(height: 1, color: Colors.grey.shade100, indent: 60);
   void _copyToClipboard(String text, String label) { Clipboard.setData(ClipboardData(text: text)); ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$label copied to clipboard!'), behavior: SnackBarBehavior.floating)); }
 }

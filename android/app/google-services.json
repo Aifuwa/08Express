@@ -7,20 +7,95 @@
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:595680431417:android:a8a3244469c51c7b66ece8",
+        "mobilesdk_app_id": "1:595680431417:android:b731f33230d13f9466ece8",
         "android_client_info": {
-          "package_name": "com.example.eight_express"
+          "package_name": "com.eightexpress.app"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "595680431417-3f40970pa94e6ogpvbi7a88c800pm7td.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
+        {
+          "current_key": "AIzaSyCsQFIP0gSEtbHdYeZYuhQP-7ZCCuBoAC0"
+        },
         {
           "current_key": "AIzaSyBbb76sL3MjqY5j9L259-wY2yefyQsGPXQ"
         }
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "595680431417-3f40970pa94e6ogpvbi7a88c800pm7td.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "595680431417-5bkk4u8sss6dn6vl2f0sm20usqjje4h7.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.eightExpress"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:595680431417:android:a8a3244469c51c7b66ece8",
+        "android_client_info": {
+          "package_name": "com.example.eight_express"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "595680431417-i5j3jqs7ehr1kqjrvvh9cirmr58a5goi.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.eight_express",
+            "certificate_hash": "fe18ec70d5dfc859fffff05b0d7655e0f8434ff5"
+          }
+        },
+        {
+          "client_id": "595680431417-v8jo33469ajlqmhn4q511eabbde3g420.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.eight_express",
+            "certificate_hash": "be204b8d3daa5e7166b4181e96f585429d24201e"
+          }
+        },
+        {
+          "client_id": "595680431417-3f40970pa94e6ogpvbi7a88c800pm7td.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCsQFIP0gSEtbHdYeZYuhQP-7ZCCuBoAC0"
+        },
+        {
+          "current_key": "AIzaSyBbb76sL3MjqY5j9L259-wY2yefyQsGPXQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "595680431417-3f40970pa94e6ogpvbi7a88c800pm7td.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "595680431417-5bkk4u8sss6dn6vl2f0sm20usqjje4h7.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.eightExpress"
+              }
+            }
+          ]
         }
       }
     }

@@ -1,229 +1,275 @@
+import 'dart:math' as math;
+import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
+import 'package:firebase_ui_auth/firebase_ui_auth.dart';
 import 'package:provider/provider.dart';
 import 'package:eight_express/providers/user_provider.dart';
+import 'package:eight_express/constants/legal_texts.dart';
 import 'package:eight_express/widgets/custom_loader.dart';
-
-enum AuthMode { login, register, otpVerify }
 
 class AuthScreen extends StatefulWidget {
   const AuthScreen({super.key});
+
   @override
   State<AuthScreen> createState() => _AuthScreenState();
 }
 
-class _AuthScreenState extends State<AuthScreen> {
-  final _formKey = GlobalKey<FormState>();
-  final TextEditingController _identityController = TextEditingController();
-  final TextEditingController _passwordController = TextEditingController();
-  final TextEditingController _nameController = TextEditingController();
-  final TextEditingController _otpController = TextEditingController();
+class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
+  late AnimationController _bgAnimController;
 
-  AuthMode _authMode = AuthMode.login;
-  bool _isLoading = false;
-  bool _agreedToTerms = false;
-  String? _errorMessage;
-
-  bool get _isPhoneInput => _identityController.text.isNotEmpty && RegExp(r'^\d').hasMatch(_identityController.text);
-
-  Future<void> _submit() async {
-    if (!_formKey.currentState!.validate()) return;
-    if (_authMode == AuthMode.register && !_agreedToTerms) {
-      setState(() => _errorMessage = "Please agree to the terms.");
-      return;
-    }
-
-    setState(() { _isLoading = true; _errorMessage = null; });
-    final prov = Provider.of<UserProvider>(context, listen: false);
-
-    try {
-      if (_authMode == AuthMode.otpVerify) {
-        await prov.verifyOTPAndLogin(_otpController.text, name: _nameController.text);
-      } else if (_isPhoneInput) {
-        await prov.sendOTP(_identityController.text, 
-          onCodeSent: (id) => setState(() { _authMode = AuthMode.otpVerify; _isLoading = false; }),
-          onError: (err) => setState(() { _errorMessage = err; _isLoading = false; }));
-      } else {
-        if (_authMode == AuthMode.login) {
-          await prov.login(_identityController.text, _passwordController.text);
-        } else {
-          await prov.registerWithEmail(_identityController.text, _passwordController.text, _nameController.text);
-          _showEmailVerifyDialog();
-        }
-      }
-    } catch (e) {
-      setState(() => _errorMessage = e.toString().replaceAll("Exception:", ""));
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
-    }
-  }
-
-  void _showEmailVerifyDialog() {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        title: const Text("Verify Email"),
-        content: const Text("A link was sent to your email. Please verify it to continue."),
-        actions: [
-          ElevatedButton(
-            onPressed: () async {
-              bool verified = await Provider.of<UserProvider>(context, listen: false).checkEmailVerified();
-              if (verified) Navigator.pop(ctx);
-              else ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Not verified yet.")));
-            },
-            child: const Text("I Verified"),
-          )
-        ],
-      ),
-    );
-  }
-
-  void _showResetDialog() {
-    final ctrl = TextEditingController();
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text("Reset Password"),
-        content: TextField(controller: ctrl, decoration: const InputDecoration(hintText: "Enter Email")),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Cancel")),
-          ElevatedButton(onPressed: () async {
-            await Provider.of<UserProvider>(context, listen: false).resetPassword(ctrl.text);
-            Navigator.pop(ctx);
-            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Reset link sent!")));
-          }, child: const Text("Send"))
-        ],
-      ),
-    );
+  @override
+  void initState() {
+    super.initState();
+    // Floating icons animation controller
+    _bgAnimController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 25),
+    )..repeat();
   }
 
   @override
-  Widget build(BuildContext context) {
-    const primaryColor = Color(0xFF0D47A1);
-    const accentColor = Color(0xFFFE7F2D);
-
-    return Scaffold(
-      body: Container(
-        height: double.infinity,
-        width: double.infinity,
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [primaryColor, Color(0xFF1976D2)],
-            begin: Alignment.topCenter, end: Alignment.bottomCenter,
-          ),
-        ),
-        child: SafeArea(
-          child: SingleChildScrollView(
-            physics: const BouncingScrollPhysics(),
-            padding: const EdgeInsets.symmetric(horizontal: 25),
-            child: Form(
-              key: _formKey,
-              child: Column(
-                children: [
-                  const SizedBox(height: 50),
-                  const Icon(Icons.local_shipping, size: 80, color: Colors.white),
-                  const Text("08Express", style: TextStyle(fontSize: 40, fontWeight: FontWeight.bold, color: Colors.white)),
-                  const SizedBox(height: 40),
-                  
-                  // Container for the inputs
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(25),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(30),
-                    ),
-                    child: Column(
-                      children: [
-                        if (_authMode != AuthMode.otpVerify)
-                        Row(children: [
-                          _buildTab("LOGIN", AuthMode.login, accentColor),
-                          _buildTab("SIGN UP", AuthMode.register, accentColor),
-                        ]),
-                        const SizedBox(height: 30),
-                        
-                        if (_authMode == AuthMode.otpVerify) ...[
-                          const Text("Enter SMS Code", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                          const SizedBox(height: 20),
-                          _buildField(_otpController, "6-Digit OTP", Icons.lock, isNumber: true),
-                        ] else ...[
-                          if (_authMode == AuthMode.register) ...[
-                            _buildField(_nameController, "Full Name", Icons.person),
-                            const SizedBox(height: 15),
-                          ],
-                          _buildField(_identityController, "Email or Phone", Icons.email),
-                          if (!_isPhoneInput) ...[
-                            const SizedBox(height: 15),
-                            _buildField(_passwordController, "Password", Icons.lock, isPass: true),
-                            if (_authMode == AuthMode.login)
-                            Align(alignment: Alignment.centerRight, child: TextButton(onPressed: _showResetDialog, child: const Text("Forgot Password?"))),
-                          ],
-                        ],
-                        
-                        if (_authMode == AuthMode.register) 
-                        Row(children: [
-                          Checkbox(value: _agreedToTerms, onChanged: (v) => setState(() => _agreedToTerms = v!)),
-                          const Expanded(child: Text("Agree to Terms & Conditions", style: TextStyle(fontSize: 12))),
-                        ]),
-
-                        if (_errorMessage != null) 
-                        Padding(padding: const EdgeInsets.only(top: 15), child: Text(_errorMessage!, style: const TextStyle(color: Colors.red, fontSize: 13))),
-
-                        const SizedBox(height: 30),
-                        _isLoading ? const CustomLoader(size: 50) : ElevatedButton(
-                          onPressed: _submit,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: accentColor, minimumSize: const Size(double.infinity, 55),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15))
-                          ),
-                          child: Text(_authMode == AuthMode.otpVerify ? "VERIFY" : (_authMode == AuthMode.login ? "LOGIN" : "SIGN UP"), 
-                            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  if (_authMode == AuthMode.otpVerify)
-                    TextButton(onPressed: () => setState(() => _authMode = AuthMode.login), child: const Text("Back", style: TextStyle(color: Colors.white))),
-                  
-                  if (_authMode == AuthMode.login)
-                    TextButton(onPressed: () => Provider.of<UserProvider>(context, listen: false).enterGuestMode(), 
-                      child: const Text("Continue as Guest", style: TextStyle(color: Colors.white))),
-                  const SizedBox(height: 40),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
+  void dispose() {
+    _bgAnimController.dispose();
+    super.dispose();
   }
 
-  Widget _buildTab(String label, AuthMode mode, Color color) {
-    bool active = _authMode == mode;
-    return Expanded(
-      child: InkWell(
-        onTap: () => setState(() => _authMode = mode),
+  // --- TRANSITION TRIGGER ---
+  // Tells the Provider to show the blurred loading overlay
+  Future<void> _triggerTransition() async {
+    final userProv = Provider.of<UserProvider>(context, listen: false);
+    await userProv.startLoginTransition();
+  }
+
+  // --- LEGAL MODAL HELPER ---
+  void _showLegalModal(String title, String content) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        height: MediaQuery.of(context).size.height * 0.75,
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
+        ),
+        padding: const EdgeInsets.all(24),
         child: Column(children: [
-          Text(label, style: TextStyle(color: active ? color : Colors.grey, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 5),
-          Container(height: 3, color: active ? color : Colors.transparent),
+          Container(
+            width: 40, 
+            height: 5, 
+            decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(10))
+          ),
+          const SizedBox(height: 20),
+          Text(title, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+          const Divider(height: 30),
+          Expanded(child: SingleChildScrollView(child: Text(content, style: const TextStyle(height: 1.6, color: Colors.black87)))),
+          const SizedBox(height: 20),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx),
+            style: ElevatedButton.styleFrom(minimumSize: const Size(200, 50)),
+            child: const Text("Close"),
+          )
         ]),
       ),
     );
   }
 
-  Widget _buildField(TextEditingController ctrl, String hint, IconData icon, {bool isPass = false, bool isNumber = false}) {
-    return TextFormField(
-      controller: ctrl,
-      obscureText: isPass,
-      keyboardType: isNumber ? TextInputType.number : TextInputType.text,
-      decoration: InputDecoration(
-        prefixIcon: Icon(icon, color: Colors.grey),
-        hintText: hint, filled: true, fillColor: Colors.grey[50],
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(15), borderSide: BorderSide.none),
+  // --- FLOATING ICON HELPER ---
+  Widget _buildFloatingIcon(IconData icon, double top, double left, double speed) {
+    return AnimatedBuilder(
+      animation: _bgAnimController,
+      builder: (ctx, child) {
+        double angle = _bgAnimController.value * 2 * math.pi;
+        return Positioned(
+          top: top + (math.sin(angle * speed) * 15),
+          left: left + (math.cos(angle * speed) * 15),
+          child: Icon(icon, color: Colors.white.withOpacity(0.15), size: 40),
+        );
+      },
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    const Color orange = Color(0xFFFE7F2D);
+    const Color darkBlue = Color(0xFF0D47A1);
+    const Color midBlue = Color(0xFF1976D2);
+    const Color lightBlue = Color(0xFF42A5F5);
+
+    // KEYBOARD DETECTION: Used to prevent the "25px overflow" error
+    final double keyboardPadding = MediaQuery.of(context).viewInsets.bottom;
+    final bool isKeyboardOpen = keyboardPadding > 0;
+    final userProv = Provider.of<UserProvider>(context);
+
+    return Scaffold(
+      // Ensure the scaffold resizes to make room for keyboard
+      resizeToAvoidBottomInset: true,
+      backgroundColor: Colors.white,
+      body: Stack(
+        children: [
+          // 1. MAIN FIREBASE AUTH UI
+          Theme(
+            data: ThemeData(
+              useMaterial3: true,
+              brightness: Brightness.light,
+              colorScheme: ColorScheme.fromSeed(seedColor: orange, primary: orange),
+              // --- VISIBLE INPUT BORDERS ---
+              inputDecorationTheme: InputDecorationTheme(
+                filled: true,
+                fillColor: Colors.white,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  borderSide: BorderSide(color: Colors.grey.shade300, width: 1.5),
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  borderSide: const BorderSide(color: orange, width: 2),
+                ),
+                errorBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  borderSide: const BorderSide(color: Colors.redAccent, width: 1.5),
+                ),
+              ),
+              elevatedButtonTheme: ElevatedButtonThemeData(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: orange,
+                  foregroundColor: Colors.white,
+                  minimumSize: const Size(double.infinity, 58),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  elevation: 2,
+                ),
+              ),
+            ),
+            child: SignInScreen(
+              providers: [EmailAuthProvider(), PhoneAuthProvider()],
+              // DYNAMIC HEADER: Shrinks when keyboard is open to prevent the 25px overflow
+              headerMaxExtent: isKeyboardOpen ? 120 : 230,
+              headerBuilder: (context, constraints, shrinkOffset) {
+                return Container(
+                  width: double.infinity,
+                  decoration: const BoxDecoration(
+                    // --- PREMIUM SUNRISE GRADIENT ---
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [darkBlue, midBlue, lightBlue],
+                      stops: [0.1, 0.6, 1.0],
+                    ),
+                  ),
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      if (!isKeyboardOpen) ...[
+                        _buildFloatingIcon(Icons.local_shipping_outlined, 30, 40, 1.0),
+                        _buildFloatingIcon(Icons.shopping_bag_outlined, 100, 280, 0.7),
+                      ],
+                      Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.local_shipping_rounded, size: isKeyboardOpen ? 40 : 55, color: Colors.white),
+                          if (!isKeyboardOpen) ...[
+                            const SizedBox(height: 10),
+                            const Text(
+                              "08Express", 
+                              style: TextStyle(
+                                color: Colors.white, 
+                                fontSize: 36, 
+                                fontWeight: FontWeight.w900, 
+                                letterSpacing: 2,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ],
+                  ),
+                );
+              },
+              footerBuilder: (context, action) {
+                return Padding(
+                  padding: const EdgeInsets.only(top: 25, bottom: 10),
+                  child: Column(
+                    children: [
+                      // MODERN LEGAL TEXT (Implied Consent)
+                      RichText(
+                        textAlign: TextAlign.center,
+                        text: TextSpan(
+                          style: const TextStyle(color: Colors.black45, fontSize: 11.5, height: 1.5),
+                          children: [
+                            const TextSpan(text: "By continuing, you agree to our "),
+                            _linkSpan("Terms", () => _showLegalModal("Terms & Conditions", LegalTexts.termsAndConditions)),
+                            const TextSpan(text: ", "),
+                            _linkSpan("Privacy", () => _showLegalModal("Privacy Policy", LegalTexts.privacyPolicy)),
+                            const TextSpan(text: " and "),
+                            _linkSpan("Refund Policy", () => _showLegalModal("Refund Policy", LegalTexts.refundPolicy)),
+                          ],
+                        ),
+                      ),
+                      if (!isKeyboardOpen && action == AuthAction.signIn) ...[
+                        const SizedBox(height: 15),
+                        TextButton(
+                          onPressed: () => userProv.enterGuestMode(),
+                          child: const Text("Continue as Guest", style: TextStyle(color: Colors.grey, fontWeight: FontWeight.w600)),
+                        ),
+                      ],
+                    ],
+                  ),
+                );
+              },
+              actions: [
+                AuthStateChangeAction<SignedIn>((context, state) async {
+                  await _triggerTransition();
+                }),
+                AuthStateChangeAction<UserCreated>((context, state) async {
+                  final user = state.credential.user;
+                  if (user != null) {
+                    await userProv.createInitialUserDocument(user);
+                    await _triggerTransition();
+                  }
+                }),
+                ForgotPasswordAction((context, email) {
+                  Navigator.push(context, MaterialPageRoute(builder: (context) => ForgotPasswordScreen(email: email)));
+                }),
+              ],
+            ),
+          ),
+
+          // 2. PREMIUM TRANSITION OVERLAY (The Professional Loader)
+          if (userProv.isTransitioning)
+            Positioned.fill(
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+                child: Container(
+                  color: Colors.white.withOpacity(0.85),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const CustomLoader(size: 90),
+                      const SizedBox(height: 25),
+                      Text(
+                        "Securing your shopping session...", 
+                        textAlign: TextAlign.center,
+                        style: TextStyle(fontSize: 19, fontWeight: FontWeight.bold, color: darkBlue.withOpacity(0.8)),
+                      ),
+                      const SizedBox(height: 8),
+                      const Text("Preparing your 08Express experience", style: TextStyle(color: Colors.grey, fontSize: 14)),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
-      validator: (v) => (v == null || v.isEmpty) ? "Required" : null,
+    );
+  }
+
+  TextSpan _linkSpan(String text, VoidCallback onTap) {
+    return TextSpan(
+      text: text,
+      style: const TextStyle(color: Colors.blue, fontWeight: FontWeight.bold, decoration: TextDecoration.underline),
+      recognizer: TapGestureRecognizer()..onTap = onTap,
     );
   }
 }

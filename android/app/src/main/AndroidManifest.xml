@@ -1,5 +1,5 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.example.eight_express">
+    package="com.eightexpress.app">
     
     <!-- Permissions -->
     <uses-permission android:name="android.permission.INTERNET"/>

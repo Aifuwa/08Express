@@ -6,6 +6,7 @@ plugins {
     id("kotlin-android")
     id("dev.flutter.flutter-gradle-plugin")
     id("com.google.gms.google-services")
+    id("com.google.firebase.crashlytics")
 }
 
 val keystoreProperties = Properties()
@@ -15,12 +16,12 @@ if (keystorePropertiesFile.exists()) {
 }
 
 android {
-    namespace = "com.example.eight_express"
+    namespace = "com.eightexpress.app"
     
     // FIXED: Explicitly set to 35 to support Firebase Push Notifications
     compileSdk = 36 
     ndkVersion = flutter.ndkVersion
-
+    //ndkVersion = "29.0.13599879"
     compileOptions {
         isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_1_8
@@ -32,7 +33,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.example.eight_express"
+        applicationId = "com.eightexpress.app"
         minSdk = flutter.minSdkVersion // Recommended for modern apps
         
         // FIXED: Explicitly set to 35 to prevent "Unknown calling package" error
