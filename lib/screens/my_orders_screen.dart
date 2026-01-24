@@ -44,7 +44,7 @@ class MyOrdersScreen extends StatelessWidget {
                 pinned: true,
                 elevation: 0,
                 centerTitle: true,
-                backgroundColor: Colors.transparent,
+                backgroundColor: Colors.white.withOpacity(0.1),
                 leading: IconButton(
                   icon: const Icon(Icons.arrow_back_ios_new, color: Colors.black87, size: 20),
                   onPressed: () => Navigator.pop(context),
@@ -66,37 +66,18 @@ class MyOrdersScreen extends StatelessWidget {
                 StreamBuilder<List<AppOrder>>(
                   stream: orderService.getUserOrders(),
                   builder: (context, snapshot) {
-                    // FIX: Handle Errors (Stops the infinite spinner)
                     if (snapshot.hasError) {
                       return SliverFillRemaining(
-                        child: Center(
-                          child: Padding(
-                            padding: const EdgeInsets.all(30.0),
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                const Icon(Icons.error_outline, color: Colors.red, size: 40),
-                                const SizedBox(height: 10),
-                                Text(
-                                  "Database Error: ${snapshot.error}",
-                                  textAlign: TextAlign.center,
-                                  style: const TextStyle(color: Colors.red, fontSize: 12),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
+                        child: Center(child: Text("Error loading orders")),
                       );
                     }
 
-                    // 1. Loading state
                     if (snapshot.connectionState == ConnectionState.waiting) {
                       return const SliverFillRemaining(
                         child: Center(child: CustomLoader(size: 70)),
                       );
                     }
                     
-                    // 2. Empty state
                     if (!snapshot.hasData || snapshot.data!.isEmpty) {
                       return SliverFillRemaining(child: _buildEmptyState(context, primaryColor));
                     }
@@ -126,16 +107,11 @@ class MyOrdersScreen extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Image.network(
-            'https://cdn-icons-png.flaticon.com/512/3500/3500833.png',
-            height: 180,
-            color: color.withOpacity(0.2),
-            errorBuilder: (context, error, stackTrace) => Icon(Icons.shopping_bag_outlined, size: 100, color: color.withOpacity(0.2)),
-          ),
+          Icon(Icons.shopping_bag_outlined, size: 100, color: color.withOpacity(0.2)),
           const SizedBox(height: 20),
           const Text("No orders yet", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.black87)),
           const SizedBox(height: 10),
-          const Text("Your shopping history will appear here!", style: TextStyle(color: Colors.grey)),
+          const Text("Your history will appear here.", style: TextStyle(color: Colors.grey)),
           const SizedBox(height: 30),
           ElevatedButton(
             onPressed: () => Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const HomeScreen())),
@@ -143,7 +119,6 @@ class MyOrdersScreen extends StatelessWidget {
               backgroundColor: color,
               padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 15),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-              elevation: 0,
             ),
             child: const Text("Start Browsing", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
           ),
@@ -160,7 +135,14 @@ class _OrderCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final status = _getStatusDetails(order.status);
+    // Correctly accessing the new dynamic fields from the model
+    final List<dynamic> milestones = order.trackingMilestones;
+    final int currentStep = order.currentStep;
+    
+    final String currentStatusLabel = (currentStep < milestones.length) 
+        ? milestones[currentStep].toString().toUpperCase() 
+        : milestones.last.toString().toUpperCase();
+
     final String? previewImage = order.items.isNotEmpty ? order.items.first.imageUrl : null;
 
     return Container(
@@ -212,14 +194,21 @@ class _OrderCard extends StatelessWidget {
                           const SizedBox(height: 4),
                           Text(DateFormat('MMM dd, yyyy • hh:mm a').format(order.orderDate.toDate()), style: TextStyle(color: Colors.grey.shade500, fontSize: 12)),
                           const SizedBox(height: 12),
+                          
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                            decoration: BoxDecoration(color: status.color.withOpacity(0.1), borderRadius: BorderRadius.circular(12)),
-                            child: Row(mainAxisSize: MainAxisSize.min, children: [
-                              Icon(status.icon, size: 14, color: status.color),
-                              const SizedBox(width: 6),
-                              Text(status.label, style: TextStyle(color: status.color, fontSize: 11, fontWeight: FontWeight.w900)),
-                            ]),
+                            decoration: BoxDecoration(
+                              color: _getStatusColor(currentStatusLabel).withOpacity(0.1), 
+                              borderRadius: BorderRadius.circular(12)
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min, 
+                              children: [
+                                Icon(Icons.lens, size: 8, color: _getStatusColor(currentStatusLabel)),
+                                const SizedBox(width: 6),
+                                Text(currentStatusLabel, style: TextStyle(color: _getStatusColor(currentStatusLabel), fontSize: 10, fontWeight: FontWeight.w900)),
+                              ],
+                            ),
                           ),
                         ],
                       ),
@@ -227,6 +216,41 @@ class _OrderCard extends StatelessWidget {
                   ],
                 ),
               ),
+
+              // THE TRACKING LINE (MATCHES FIRESTORE MILESTONES)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Column(
+                  children: [
+                    Row(
+                      children: List.generate(milestones.length, (index) {
+                        bool isCompleted = index <= currentStep;
+                        return Expanded(
+                          child: Container(
+                            height: 4,
+                            margin: const EdgeInsets.symmetric(horizontal: 2),
+                            decoration: BoxDecoration(
+                              color: isCompleted ? primaryColor : Colors.grey[200],
+                              borderRadius: BorderRadius.circular(2),
+                            ),
+                          ),
+                        );
+                      }),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text("Progress", style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.grey)),
+                        Text("${((currentStep + 1) / milestones.length * 100).toInt()}%", style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFFFE7F2D))),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 15),
+
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
                 decoration: BoxDecoration(color: Colors.grey.shade50.withOpacity(0.5), borderRadius: const BorderRadius.vertical(bottom: Radius.circular(24))),
@@ -234,10 +258,10 @@ class _OrderCard extends StatelessWidget {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text("TOTAL AMOUNT", style: TextStyle(color: Colors.grey.shade400, fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 0.5)),
-                      Text('₦${order.totalAmount.toStringAsFixed(2)}', style: TextStyle(color: primaryColor, fontWeight: FontWeight.w900, fontSize: 18)),
+                      Text("TOTAL PAID", style: TextStyle(color: Colors.grey.shade400, fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 0.5)),
+                      Text('₦${order.totalAmount.toStringAsFixed(0)}', style: TextStyle(color: primaryColor, fontWeight: FontWeight.w900, fontSize: 18)),
                     ]),
-                    Row(children: [const Text("View Details", style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.black54)), const SizedBox(width: 5), Icon(Icons.arrow_forward_ios_rounded, size: 14, color: Colors.grey)]),
+                    const Row(children: [Text("Details", style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.black54)), SizedBox(width: 5), Icon(Icons.arrow_forward_ios_rounded, size: 14, color: Colors.grey)]),
                   ],
                 ),
               ),
@@ -248,19 +272,10 @@ class _OrderCard extends StatelessWidget {
     );
   }
 
-  _StatusInfo _getStatusDetails(String status) {
-    final s = status.toLowerCase();
-    if (s.contains('delivered')) return _StatusInfo(Icons.check_circle_rounded, Colors.green, "DELIVERED");
-    if (s.contains('shipped') || s.contains('way')) return _StatusInfo(Icons.local_shipping_rounded, Colors.blue, "ON THE WAY");
-    if (s.contains('pending') || s.contains('processing')) return _StatusInfo(Icons.timer_rounded, Colors.orange, "PROCESSING");
-    if (s.contains('cancelled')) return _StatusInfo(Icons.cancel_rounded, Colors.red, "CANCELLED");
-    return _StatusInfo(Icons.help_rounded, Colors.grey, status.toUpperCase());
+  Color _getStatusColor(String status) {
+    if (status.contains('DELIVERED') || status.contains('COLLECTED')) return Colors.green;
+    if (status.contains('CANCELLED')) return Colors.red;
+    if (status.contains('WAY') || status.contains('TRANSIT')) return Colors.blue;
+    return const Color(0xFFFE7F2D);
   }
-}
-
-class _StatusInfo {
-  final IconData icon;
-  final Color color;
-  final String label;
-  _StatusInfo(this.icon, this.color, this.label);
 }

@@ -1,10 +1,9 @@
-// lib/providers/category_provider.dart (UPDATED)
 import 'package:flutter/material.dart';
-import 'package:eight_express/models/category_model.dart'; // Our AppCategory model
-import 'package:eight_express/services/category_service.dart'; // Our new CategoryService
+import 'package:eight_express/models/category_model.dart';
+import 'package:eight_express/services/category_service.dart';
 
 class CategoryProvider with ChangeNotifier {
-  final CategoryService _categoryService = CategoryService(); // Instantiate the new service
+  final CategoryService _categoryService = CategoryService();
   List<AppCategory> _categories = [];
   bool _isLoading = false;
   String? _errorMessage;
@@ -13,33 +12,29 @@ class CategoryProvider with ChangeNotifier {
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
 
-  CategoryProvider() {
-    fetchCategories(); // Initial fetch when provider is created
-  }
-
   Future<void> fetchCategories() async {
-    if (_isLoading) return; // Prevent multiple simultaneous fetches
+    if (_isLoading) return;
 
     _isLoading = true;
     _errorMessage = null;
+    notifyListeners(); // Show loader immediately
 
     try {
-      _categories = await _categoryService.getCategories(); // Use the new service method
+      _categories = await _categoryService.getCategories();
     } catch (e) {
-      _errorMessage = 'Failed to load categories: $e';
-      debugPrint('Error fetching categories: $_errorMessage'); // Use debugPrint
+      _errorMessage = e.toString();
     } finally {
       _isLoading = false;
-      notifyListeners(); // Notify listeners of state change
+      notifyListeners(); // Hide loader and show list or error
     }
   }
 
   AppCategory? getCategoryByName(String name) {
-    // Added a null check and more robust error handling
     try {
-      return _categories.firstWhere((category) => category.name.toLowerCase() == name.toLowerCase());
+      return _categories.firstWhere(
+        (category) => category.name.toLowerCase() == name.toLowerCase()
+      );
     } catch (e) {
-      debugPrint('Category with name "$name" not found: $e'); // Use debugPrint
       return null;
     }
   }

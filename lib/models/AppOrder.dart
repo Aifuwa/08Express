@@ -12,6 +12,9 @@ class AppOrder {
   final Timestamp orderDate;
   final String status;
   final String? receiptImageUrl;
+  // NEW FIELDS ADDED HERE
+  final int currentStep;
+  final List<dynamic> trackingMilestones;
 
   AppOrder({
     required this.id,
@@ -22,6 +25,8 @@ class AppOrder {
     required this.deliveryMethod, 
     required this.items,
     required this.orderDate,
+    required this.currentStep,
+    required this.trackingMilestones,
     this.status = 'pending',
     this.receiptImageUrl,
   });
@@ -34,7 +39,6 @@ class AppOrder {
     }
 
     List<OrderItem> orderItems = [];
-    // Matching the key 'orderItems' from toFirestore
     if (data['orderItems'] != null && data['orderItems'] is List) {
       orderItems = (data['orderItems'] as List)
           .map((itemMap) => OrderItem.fromMap(itemMap as Map<String, dynamic>))
@@ -49,10 +53,18 @@ class AppOrder {
       shippingAddress: data['shippingAddress'] as String? ?? 'No Address',
       deliveryMethod: data['deliveryMethod'] as String? ?? 'delivery', 
       items: orderItems,
-      // FIX: Handle the null timestamp delay from FieldValue.serverTimestamp()
       orderDate: data['orderDate'] as Timestamp? ?? Timestamp.now(),
       status: data['status'] as String? ?? 'pending',
       receiptImageUrl: data['receiptImageUrl'] as String?,
+      // MAP THE NEW FIELDS FROM FIRESTORE
+      currentStep: (data['currentStep'] as num?)?.toInt() ?? 0,
+      trackingMilestones: data['trackingMilestones'] as List<dynamic>? ?? [
+        "Order Placed",
+        "Payment Verified",
+        "Processing",
+        "In Transit",
+        "Delivered"
+      ],
     );
   }
 
@@ -67,6 +79,8 @@ class AppOrder {
       'orderDate': orderDate,
       'status': status,
       'receiptImageUrl': receiptImageUrl,
+      'currentStep': currentStep,
+      'trackingMilestones': trackingMilestones,
     };
   }
 }
@@ -99,7 +113,6 @@ class OrderItem {
   factory OrderItem.fromMap(Map<String, dynamic> data) {
     return OrderItem(
       productId: data['productId'] as String? ?? '',
-      // Support both 'productName' and 'name' keys
       name: data['productName'] as String? ?? data['name'] as String? ?? 'Unknown',
       price: (data['price'] as num?)?.toDouble() ?? 0.0,
       imageUrl: data['imageUrl'] as String? ?? '',
