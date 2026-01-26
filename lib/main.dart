@@ -23,7 +23,6 @@ import 'package:eight_express/services/remote_config_service.dart';
 import 'package:eight_express/screens/maintenance_screen.dart';
 import 'package:firebase_remote_config/firebase_remote_config.dart';
 import 'package:firebase_crashlytics/firebase_crashlytics.dart';
-import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:eight_express/services/notification_service.dart';
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
@@ -41,39 +40,46 @@ const AndroidNotificationChannel channel = AndroidNotificationChannel(
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
-    if (message.notification != null) {
+  if (message.notification != null) {
     await NotificationService().saveNotification(
       title: message.notification!.title ?? "New Notification",
       body: message.notification!.body ?? "",
       type: message.data['type'] ?? 'system',
     );
   }
-
 }
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
+  // 1. Initialize Remote Config
   final remoteConfig = FirebaseRemoteConfig.instance;
+  
+  // 2. Set settings with 10-second timeout to handle slow networks
   await remoteConfig.setConfigSettings(RemoteConfigSettings(
     fetchTimeout: const Duration(seconds: 10),
     minimumFetchInterval: const Duration(seconds: 0),
   ));
 
+  // 3. Fetch and activate the data from the cloud
   try {
     await remoteConfig.fetchAndActivate();
   } catch (e) {
-    debugPrint("Remote Config Fetch Failed: $e");
+    debugPrint("Remote Config Fetch Failed (Using Defaults): $e");
   }
 
+  // 4. Check for Maintenance Mode before starting
   if (remoteConfig.getBool('is_under_maintenance')) {
     runApp(const MaterialApp(home: MaintenanceScreen(), debugShowCheckedModeBanner: false));
     return;
   }
 
+  // 5. Initialize Crashlytics
   FlutterError.onError = FirebaseCrashlytics.instance.recordFlutterFatalError;
 
+  // --- DOCUMENTATION IMPLEMENTATION: CONFIGURE AUTH PROVIDERS ---
+  // This registers the handlers required for Email Resets and Phone SMS to function
   auth_ui.FirebaseUIAuth.configureProviders([
     auth_ui.EmailAuthProvider(),
     auth_ui.PhoneAuthProvider(),
@@ -103,8 +109,11 @@ class _MyAppState extends State<MyApp> {
   Future<void> _initFCM() async {
     FirebaseMessaging messaging = FirebaseMessaging.instance;
     await messaging.requestPermission(alert: true, badge: true, sound: true);
+
+    // --- SUBSCRIBE TO TOPIC FOR BROADCAST NOTIFICATIONS ---
     await messaging.subscribeToTopic('all_users');
 
+    // --- OBSERVE AUTH CHANGES TO SAVE TOKEN UPON LOGIN ---
     FirebaseAuth.instance.authStateChanges().listen((User? user) {
       if (user != null) {
         _saveDeviceToken();
@@ -119,31 +128,41 @@ class _MyAppState extends State<MyApp> {
       },
     );
 
-    FirebaseMessaging.onMessage.listen((RemoteMessage message) async{
+    FirebaseMessaging.onMessage.listen((RemoteMessage message) async {
       RemoteNotification? notification = message.notification;
       if (notification != null) {
-
-
-         // --- ADD THIS LINE TO SAVE TO FIRESTORE ---
+        // --- SAVE TO FIRESTORE UPON RECEIVING MESSAGE ---
         await NotificationService().saveNotification(
           title: notification.title ?? "New Notification",
           body: notification.body ?? "",
           type: message.data['type'] ?? 'system',
         );
 
-
-
         flutterLocalNotificationsPlugin.show(
-          notification.hashCode, notification.title, notification.body,
-          NotificationDetails(android: AndroidNotificationDetails(channel.id, channel.name, priority: Priority.high, importance: Importance.max, icon: '@mipmap/launcher_icon')),
+          notification.hashCode, 
+          notification.title, 
+          notification.body,
+          NotificationDetails(
+            android: AndroidNotificationDetails(
+              channel.id, 
+              channel.name, 
+              priority: Priority.high, 
+              importance: Importance.max, 
+              icon: '@mipmap/launcher_icon'
+            )
+          ),
           payload: message.data['screen'],
         );
       }
     });
 
     FirebaseMessaging.onMessageOpenedApp.listen((msg) => _handleNav(msg.data['screen']));
+    
+    // Debug token for manual testing
+    debugPrint("FCM TOKEN: ${await messaging.getToken()}");
   }
 
+  // --- SAVE TOKEN TO FIRESTORE LINKED TO CURRENT USER ---
   Future<void> _saveDeviceToken() async {
     User? currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser != null) {

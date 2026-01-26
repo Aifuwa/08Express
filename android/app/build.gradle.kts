@@ -18,10 +18,10 @@ if (keystorePropertiesFile.exists()) {
 android {
     namespace = "com.eightexpress.app"
     
-    // FIXED: Explicitly set to 35 to support Firebase Push Notifications
+    // Explicitly set to 36 to support modern Firebase libraries and Push Notifications
     compileSdk = 36 
     ndkVersion = flutter.ndkVersion
-    //ndkVersion = "29.0.13599879"
+
     compileOptions {
         isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_1_8
@@ -34,9 +34,9 @@ android {
 
     defaultConfig {
         applicationId = "com.eightexpress.app"
-        minSdk = flutter.minSdkVersion // Recommended for modern apps
+        minSdk = flutter.minSdkVersion 
         
-        // FIXED: Explicitly set to 35 to prevent "Unknown calling package" error
+        // Explicitly set to 35 to prevent "Unknown calling package" error during Auth logic
         targetSdk = 35 
         
         versionCode = flutter.versionCode
@@ -47,7 +47,6 @@ android {
 
     signingConfigs {
         create("release") {
-            // Check if properties exist to prevent build crash
             if (keystorePropertiesFile.exists()) {
                 keyAlias = keystoreProperties["keyAlias"] as String
                 keyPassword = keystoreProperties["keyPassword"] as String
@@ -61,14 +60,13 @@ android {
         getByName("release") {
             signingConfig = signingConfigs.getByName("release")
             
-            // Shrinking enabled for production
+            // Optimization for production
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
         
         getByName("debug") {
-            // Ensure debug builds use the standard debug key for FCM testing
             signingConfig = signingConfigs.getByName("debug")
         }
     }
@@ -79,6 +77,21 @@ flutter {
 }
 
 dependencies {
+    // --- DOCUMENTATION IMPLEMENTATION START ---
+    
+    // 1. Import the BoM (Bill of Materials) for the Firebase platform 
+    // to ensure all Firebase library versions are compatible.
+    implementation(platform("com.google.firebase:firebase-bom:34.8.0"))
+
+    // 2. Add the dependency for the Firebase Authentication library.
+    // Versions are managed by the BoM above.
+    implementation("com.google.firebase:firebase-auth")
+
+    // --- DOCUMENTATION IMPLEMENTATION END ---
+
+    // Core library desugaring for compatibility with older Android devices
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+    
+    // Multidex support for large dependency sets
     implementation("androidx.multidex:multidex:2.0.1") 
 }

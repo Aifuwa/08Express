@@ -19,6 +19,10 @@ class UserProvider with ChangeNotifier {
   bool _isFirstTime = true; 
   bool _isTransitioning = false; 
 
+  // --- DOCUMENTATION IMPLEMENTATION: PHONE AUTH STATE ---
+  String? _verificationId;
+  int? _resendToken;
+
   UserProvider() {
     _initUserProvider();
   }
@@ -64,6 +68,53 @@ class UserProvider with ChangeNotifier {
   bool get isProfileLoaded => _isProfileLoaded;
   bool get isFirstTime => _isFirstTime;
   bool get isTransitioning => _isTransitioning;
+
+  // --- DOCUMENTATION IMPLEMENTATION: MANUAL PHONE AUTH FLOW ---
+
+  Future<void> verifyPhoneNumber(String phoneNumber, {
+    required Function(String code) onCodeSent,
+    required Function(String error) onFailed,
+    required Function() onAutoVerified,
+  }) async {
+    await _auth.verifyPhoneNumber(
+      phoneNumber: phoneNumber,
+      timeout: const Duration(seconds: 60),
+      // 1. Instant verification or Auto-retrieval
+      verificationCompleted: (PhoneAuthCredential credential) async {
+        await _auth.signInWithCredential(credential);
+        onAutoVerified();
+      },
+      // 2. Failure Handling (Quota, Invalid Format, etc)
+      verificationFailed: (FirebaseAuthException e) {
+        String errorMessage = "Verification failed";
+        if (e.code == 'invalid-phone-number') {
+          errorMessage = "The provided phone number is not valid.";
+        } else if (e.code == 'too-many-requests') {
+          errorMessage = "SMS quota exceeded. Please try again later.";
+        }
+        onFailed(errorMessage);
+      },
+      // FIXED: Parameter name corrected to codeSent (resolves build error)
+      codeSent: (String verificationId, int? resendToken) {
+        _verificationId = verificationId;
+        _resendToken = resendToken;
+        onCodeSent(verificationId);
+      },
+      // 4. Auto-retrieval timeout
+      codeAutoRetrievalTimeout: (String verificationId) {
+        _verificationId = verificationId;
+      },
+    );
+  }
+
+  Future<void> signInWithSmsCode(String smsCode) async {
+    if (_verificationId == null) return;
+    final credential = PhoneAuthProvider.credential(
+      verificationId: _verificationId!,
+      smsCode: smsCode,
+    );
+    await _auth.signInWithCredential(credential);
+  }
 
   // --- TRANSITIONS & INTRO ---
   Future<void> startLoginTransition() async {
@@ -119,7 +170,7 @@ class UserProvider with ChangeNotifier {
       if (!doc.exists) {
         AppUser newUser = AppUser(
           uid: user.uid,
-          email: user.email, // Ensure email is saved at first creation
+          email: user.email, 
           name: user.displayName ?? (user.email != null ? user.email!.split('@')[0] : "User"),
           isAdmin: false,
           setupComplete: false,
@@ -208,7 +259,12 @@ class UserProvider with ChangeNotifier {
      }
   }
 
-  // --- AUTH & ACCOUNT ACTIONS ---
+  // --- AUTH ACTIONS ---
+  Future<void> sendPasswordReset(String email) async {
+    // DOCUMENTATION IMPLEMENTATION: Explicit call to send reset link
+    await _auth.sendPasswordResetEmail(email: email);
+  }
+
   Future<void> changePassword(String currentPassword, String newPassword) async {
     User? user = _auth.currentUser;
     if (user != null && user.email != null) {

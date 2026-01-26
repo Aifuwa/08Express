@@ -12,7 +12,6 @@ class AppOrder {
   final Timestamp orderDate;
   final String status;
   final String? receiptImageUrl;
-  // NEW FIELDS ADDED HERE
   final int currentStep;
   final List<dynamic> trackingMilestones;
 
@@ -39,6 +38,7 @@ class AppOrder {
     }
 
     List<OrderItem> orderItems = [];
+    // Matching the key 'orderItems' used in toFirestore and common in your DB
     if (data['orderItems'] != null && data['orderItems'] is List) {
       orderItems = (data['orderItems'] as List)
           .map((itemMap) => OrderItem.fromMap(itemMap as Map<String, dynamic>))
@@ -53,17 +53,19 @@ class AppOrder {
       shippingAddress: data['shippingAddress'] as String? ?? 'No Address',
       deliveryMethod: data['deliveryMethod'] as String? ?? 'delivery', 
       items: orderItems,
+      // Handle null delay from server side timestamps
       orderDate: data['orderDate'] as Timestamp? ?? Timestamp.now(),
       status: data['status'] as String? ?? 'pending',
       receiptImageUrl: data['receiptImageUrl'] as String?,
-      // MAP THE NEW FIELDS FROM FIRESTORE
       currentStep: (data['currentStep'] as num?)?.toInt() ?? 0,
+      // UPDATED: Default milestones now include "Cancelled" to match Admin Dashboard
       trackingMilestones: data['trackingMilestones'] as List<dynamic>? ?? [
         "Order Placed",
         "Payment Verified",
         "Processing",
         "In Transit",
-        "Delivered"
+        "Delivered",
+        "Cancelled"
       ],
     );
   }
@@ -113,6 +115,7 @@ class OrderItem {
   factory OrderItem.fromMap(Map<String, dynamic> data) {
     return OrderItem(
       productId: data['productId'] as String? ?? '',
+      // Supports both 'productName' and 'name' keys for flexibility
       name: data['productName'] as String? ?? data['name'] as String? ?? 'Unknown',
       price: (data['price'] as num?)?.toDouble() ?? 0.0,
       imageUrl: data['imageUrl'] as String? ?? '',

@@ -21,7 +21,7 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
-    // Floating icons animation controller
+    // Floating icons animation controller - Preserved
     _bgAnimController = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 25),
@@ -229,8 +229,17 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
                     await _triggerTransition();
                   }
                 }),
+                // --- CORRECTED FORGOT PASSWORD ACTION ---
                 ForgotPasswordAction((context, email) {
-                  Navigator.push(context, MaterialPageRoute(builder: (context) => ForgotPasswordScreen(email: email)));
+                  Navigator.push(
+                    context, 
+                    MaterialPageRoute(
+                      builder: (context) => ForgotPasswordScreen(
+                        email: email,
+                        headerMaxExtent: 200,
+                      ),
+                    ),
+                  );
                 }),
               ],
             ),

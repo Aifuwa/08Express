@@ -13,6 +13,7 @@ import 'package:eight_express/screens/user_addresses_screen.dart';
 import 'package:eight_express/screens/my_orders_screen.dart';
 import 'package:eight_express/screens/home_screen.dart';
 import 'package:eight_express/screens/auth_screen.dart';
+import 'package:eight_express/screens/support_screen.dart'; 
 import 'package:eight_express/constants/legal_texts.dart';
 import 'package:eight_express/services/remote_config_service.dart';
 
@@ -40,7 +41,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _phoneNumberController.text = userProvider.appUser?.phoneNumber ?? '';
   }
 
-  // --- LOGOUT CONFIRMATION DIALOG ---
+  // --- 1. LOGOUT CONFIRMATION DIALOG ---
   void _showLogoutDialog() {
     showDialog(
       context: context,
@@ -53,29 +54,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
             Text("Log Out"),
           ],
         ),
-        content: const Text("Are you sure you want to log out? You will need to sign in again to access your orders and saved addresses."),
+        content: const Text("Are you sure you want to leave? Your cart items will be saved."),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx), 
-            child: const Text("STAY", style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold)),
-          ),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("Stay")),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-            ),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
             onPressed: () async {
-              Navigator.pop(ctx); // Close dialog first
+              Navigator.pop(ctx);
               await Provider.of<UserProvider>(context, listen: false).signOut();
-              // AuthWrapper handles the redirection to AuthScreen automatically
             },
-            child: const Text("LOG OUT", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            child: const Text("Log Out", style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
     );
   }
 
+  // --- 2. DELETE ACCOUNT DIALOG ---
   void _showDeleteAccountDialog() {
     final TextEditingController passwordController = TextEditingController();
     bool isDeleting = false;
@@ -97,7 +92,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
               const SizedBox(height: 15),
               const Text(
-                "Warning: This action is irreversible. All your order history, saved addresses, and profile data will be erased forever. You cannot undo this once processed.",
+                "Warning: This action is irreversible. All your history will be erased forever.",
                 textAlign: TextAlign.center,
                 style: TextStyle(color: Colors.black87, fontSize: 14, height: 1.4),
               ),
@@ -148,6 +143,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  // --- 3. CHANGE PASSWORD DIALOG ---
   void _showChangePasswordDialog() {
     final TextEditingController currentPass = TextEditingController();
     final TextEditingController newPass = TextEditingController();
@@ -217,6 +213,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  // --- 4. LEGAL TEXT HELPERS ---
   void _showPrivacyPolicy() => _showLegalBottomSheet("Privacy Policy", LegalTexts.privacyPolicy);
   void _showTermsAndConditions() => _showLegalBottomSheet("Terms & Conditions", LegalTexts.termsAndConditions);
   void _showRefundPolicy() => _showLegalBottomSheet("Refund & Return Policy", LegalTexts.refundPolicy);
@@ -262,6 +259,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return widgets;
   }
 
+  // --- 5. CORE BUILD METHOD ---
   @override
   Widget build(BuildContext context) {
     final userProvider = Provider.of<UserProvider>(context);
@@ -309,6 +307,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
               _buildDivider(),
               _buildTile(Icons.shopping_bag, primaryColor, "My Orders", () => Navigator.push(context, MaterialPageRoute(builder: (_) => const MyOrdersScreen()))),
               _buildDivider(),
+              _buildTile(Icons.support_agent_rounded, Colors.orange, "Contact Support Hub", () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SupportScreen()))),
+              _buildDivider(),
               _buildTile(Icons.lock, Colors.purple, "Change Password", _showChangePasswordDialog),
               _buildDivider(),
               _buildTile(Icons.delete_forever, Colors.red, "Delete Account", _showDeleteAccountDialog),
@@ -330,7 +330,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               child: SizedBox(
                 width: double.infinity,
                 child: OutlinedButton.icon(
-                  onPressed: _showLogoutDialog, // Correctly linked to the confirmation dialog
+                  onPressed: _showLogoutDialog,
                   icon: const Icon(Icons.logout),
                   label: const Text("Log Out"),
                   style: OutlinedButton.styleFrom(foregroundColor: Colors.red, padding: const EdgeInsets.all(15), side: const BorderSide(color: Colors.red), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15))),
@@ -400,6 +400,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final support = RemoteConfigService.support;
     final String supportEmail = support['email'] ?? "admin@08vicenterprises.com";
     final String supportPhone = support['phone'] ?? "+2348100172239";
+    final String supportWhatsapp = support['whatsapp'] ?? supportPhone;
 
     showModalBottomSheet(context: context, isScrollControlled: true, backgroundColor: Colors.transparent, builder: (ctx) => Container(
       decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(30))),
@@ -444,7 +445,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Widget _buildField(TextEditingController c, String l, IconData i, [TextInputType t = TextInputType.text]) => TextField(controller: c, keyboardType: t, decoration: InputDecoration(labelText: l, prefixIcon: Icon(i, color: primaryColor), border: OutlineInputBorder(borderRadius: BorderRadius.circular(12))));
   Widget _buildSectionLabel(String text) => Padding(padding: const EdgeInsets.symmetric(horizontal: 25, vertical: 8), child: Align(alignment: Alignment.centerLeft, child: Text(text, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold))));
   Widget _buildCard(List<Widget> children) => Container(margin: const EdgeInsets.symmetric(horizontal: 20), decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10)]), child: Column(children: children));
-  Widget _buildTile(IconsData, Color c, String t, VoidCallback onTap) => ListTile(onTap: onTap, leading: Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: c.withOpacity(0.1), borderRadius: BorderRadius.circular(10)), child: Icon(IconsData, color: c, size: 20)), title: Text(t, style: const TextStyle(fontWeight: FontWeight.w600)), trailing: const Icon(Icons.arrow_forward_ios, size: 14));
+  Widget _buildTile(IconData i, Color c, String t, VoidCallback onTap) => ListTile(onTap: onTap, leading: Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: c.withOpacity(0.1), borderRadius: BorderRadius.circular(10)), child: Icon(i, color: c, size: 20)), title: Text(t, style: const TextStyle(fontWeight: FontWeight.w600)), trailing: const Icon(Icons.arrow_forward_ios, size: 14));
   Widget _buildDivider() => Divider(height: 1, color: Colors.grey.shade100, indent: 60);
   void _copyToClipboard(String text, String label) { Clipboard.setData(ClipboardData(text: text)); ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$label copied to clipboard!'), behavior: SnackBarBehavior.floating)); }
 }

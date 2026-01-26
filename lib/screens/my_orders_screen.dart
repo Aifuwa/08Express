@@ -15,6 +15,8 @@ class MyOrdersScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final orderService = Provider.of<OrderService>(context);
     final userProv = Provider.of<UserProvider>(context);
+    
+    // BRAND COLORS
     const Color primaryColor = Color(0xFFFE7F2D);
     const Color scaffoldBg = Color(0xFFF8F9FB);
 
@@ -22,6 +24,7 @@ class MyOrdersScreen extends StatelessWidget {
       backgroundColor: scaffoldBg,
       body: Stack(
         children: [
+          // Header Background Ambient Glow
           Positioned(
             top: 0, left: 0, right: 0,
             child: Container(
@@ -30,7 +33,7 @@ class MyOrdersScreen extends StatelessWidget {
                 gradient: LinearGradient(
                   begin: Alignment.topCenter,
                   end: Alignment.bottomCenter,
-                  colors: [primaryColor.withOpacity(0.15), scaffoldBg],
+                  colors: [primaryColor.withOpacity(0.12), scaffoldBg],
                 ),
               ),
             ),
@@ -39,6 +42,7 @@ class MyOrdersScreen extends StatelessWidget {
           CustomScrollView(
             physics: const BouncingScrollPhysics(),
             slivers: [
+              // Clean Pinned Header
               SliverAppBar(
                 expandedHeight: 100,
                 pinned: true,
@@ -52,15 +56,21 @@ class MyOrdersScreen extends StatelessWidget {
                 flexibleSpace: const FlexibleSpaceBar(
                   title: Text(
                     "My Orders",
-                    style: TextStyle(color: Colors.black87, fontWeight: FontWeight.w900, fontSize: 18),
+                    style: TextStyle(
+                      color: Colors.black87, 
+                      fontWeight: FontWeight.w900, 
+                      fontSize: 18,
+                      letterSpacing: -0.5,
+                    ),
                   ),
                   centerTitle: true,
                 ),
               ),
 
+              // Auth Check
               if (!userProv.isAuthenticated)
                 const SliverFillRemaining(
-                  child: Center(child: Text("Please login to see orders")),
+                  child: Center(child: Text("Please login to view your orders.")),
                 )
               else
                 StreamBuilder<List<AppOrder>>(
@@ -68,7 +78,7 @@ class MyOrdersScreen extends StatelessWidget {
                   builder: (context, snapshot) {
                     if (snapshot.hasError) {
                       return SliverFillRemaining(
-                        child: Center(child: Text("Error loading orders")),
+                        child: Center(child: Text("Error syncing orders: ${snapshot.error}")),
                       );
                     }
 
@@ -87,14 +97,17 @@ class MyOrdersScreen extends StatelessWidget {
                       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
                       sliver: SliverList(
                         delegate: SliverChildBuilderDelegate(
-                          (ctx, index) => _OrderCard(order: orders[index], primaryColor: primaryColor),
+                          (ctx, index) => _OrderCard(
+                            order: orders[index], 
+                            primaryColor: primaryColor
+                          ),
                           childCount: orders.length,
                         ),
                       ),
                     );
                   },
                 ),
-              const SliverToBoxAdapter(child: SizedBox(height: 50)),
+              const SliverToBoxAdapter(child: SizedBox(height: 80)),
             ],
           ),
         ],
@@ -109,18 +122,25 @@ class MyOrdersScreen extends StatelessWidget {
         children: [
           Icon(Icons.shopping_bag_outlined, size: 100, color: color.withOpacity(0.2)),
           const SizedBox(height: 20),
-          const Text("No orders yet", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.black87)),
+          const Text(
+            "No orders yet", 
+            style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.black87)
+          ),
           const SizedBox(height: 10),
-          const Text("Your history will appear here.", style: TextStyle(color: Colors.grey)),
-          const SizedBox(height: 30),
+          const Text(
+            "Your shopping history will appear here.", 
+            style: TextStyle(color: Colors.grey, fontSize: 14)
+          ),
+          const SizedBox(height: 35),
           ElevatedButton(
             onPressed: () => Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const HomeScreen())),
             style: ElevatedButton.styleFrom(
               backgroundColor: color,
-              padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 15),
+              padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 16),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              elevation: 0,
             ),
-            child: const Text("Start Browsing", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            child: const Text("START BROWSING", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, letterSpacing: 1)),
           ),
         ],
       ),
@@ -131,17 +151,21 @@ class MyOrdersScreen extends StatelessWidget {
 class _OrderCard extends StatelessWidget {
   final AppOrder order;
   final Color primaryColor;
+  
   const _OrderCard({required this.order, required this.primaryColor});
 
   @override
   Widget build(BuildContext context) {
-    // Correctly accessing the new dynamic fields from the model
     final List<dynamic> milestones = order.trackingMilestones;
     final int currentStep = order.currentStep;
     
     final String currentStatusLabel = (currentStep < milestones.length) 
         ? milestones[currentStep].toString().toUpperCase() 
         : milestones.last.toString().toUpperCase();
+
+    // Logic for Error/Cancellation coloring
+    final bool isFailed = currentStatusLabel.contains("CANCELLED") || currentStatusLabel.contains("FAILED");
+    final Color activeTrackingColor = isFailed ? Colors.red : primaryColor;
 
     final String? previewImage = order.items.isNotEmpty ? order.items.first.imageUrl : null;
 
@@ -150,7 +174,9 @@ class _OrderCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(24),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 20, offset: const Offset(0, 10))],
+        boxShadow: [
+          BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 20, offset: const Offset(0, 10))
+        ],
       ),
       child: Material(
         color: Colors.transparent,
@@ -160,27 +186,39 @@ class _OrderCard extends StatelessWidget {
           child: Column(
             children: [
               Padding(
-                padding: const EdgeInsets.all(16.0),
+                padding: const EdgeInsets.all(18.0),
                 child: Row(
                   children: [
                     Stack(
                       clipBehavior: Clip.none,
                       children: [
                         Container(
-                          width: 75, height: 75,
+                          width: 80, height: 80,
                           decoration: BoxDecoration(
                             borderRadius: BorderRadius.circular(18),
                             color: Colors.grey[50],
-                            image: previewImage != null ? DecorationImage(image: NetworkImage(previewImage), fit: BoxFit.cover) : null,
+                            image: previewImage != null 
+                              ? DecorationImage(image: NetworkImage(previewImage), fit: BoxFit.cover) 
+                              : null,
                           ),
+                          child: previewImage == null 
+                            ? const Icon(Icons.inventory_2_outlined, color: Colors.grey) 
+                            : null,
                         ),
                         if (order.items.length > 1)
                           Positioned(
                             bottom: -5, right: -5,
                             child: Container(
                               padding: const EdgeInsets.all(6),
-                              decoration: BoxDecoration(color: primaryColor, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 2)),
-                              child: Text("+${order.items.length - 1}", style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                              decoration: BoxDecoration(
+                                color: activeTrackingColor, 
+                                shape: BoxShape.circle, 
+                                border: Border.all(color: Colors.white, width: 2.5)
+                              ),
+                              child: Text(
+                                "+${order.items.length - 1}", 
+                                style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)
+                              ),
                             ),
                           ),
                       ],
@@ -190,13 +228,20 @@ class _OrderCard extends StatelessWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text("Order #${order.id.length > 6 ? order.id.substring(0, 6).toUpperCase() : order.id.toUpperCase()}", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                          Text(
+                            "Order #${order.id.length > 8 ? order.id.substring(0, 8).toUpperCase() : order.id.toUpperCase()}", 
+                            style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16, letterSpacing: -0.5)
+                          ),
                           const SizedBox(height: 4),
-                          Text(DateFormat('MMM dd, yyyy • hh:mm a').format(order.orderDate.toDate()), style: TextStyle(color: Colors.grey.shade500, fontSize: 12)),
+                          Text(
+                            DateFormat('MMM dd, yyyy • hh:mm a').format(order.orderDate.toDate()), 
+                            style: TextStyle(color: Colors.grey.shade500, fontSize: 12)
+                          ),
                           const SizedBox(height: 12),
                           
+                          // Dynamic Status Badge (Turns Red if Cancelled)
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                             decoration: BoxDecoration(
                               color: _getStatusColor(currentStatusLabel).withOpacity(0.1), 
                               borderRadius: BorderRadius.circular(12)
@@ -204,9 +249,21 @@ class _OrderCard extends StatelessWidget {
                             child: Row(
                               mainAxisSize: MainAxisSize.min, 
                               children: [
-                                Icon(Icons.lens, size: 8, color: _getStatusColor(currentStatusLabel)),
-                                const SizedBox(width: 6),
-                                Text(currentStatusLabel, style: TextStyle(color: _getStatusColor(currentStatusLabel), fontSize: 10, fontWeight: FontWeight.w900)),
+                                Icon(
+                                  isFailed ? Icons.cancel : Icons.lens, 
+                                  size: isFailed ? 12 : 8, 
+                                  color: _getStatusColor(currentStatusLabel)
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  currentStatusLabel, 
+                                  style: TextStyle(
+                                    color: _getStatusColor(currentStatusLabel), 
+                                    fontSize: 10, 
+                                    fontWeight: FontWeight.w900,
+                                    letterSpacing: 0.5,
+                                  )
+                                ),
                               ],
                             ),
                           ),
@@ -217,7 +274,7 @@ class _OrderCard extends StatelessWidget {
                 ),
               ),
 
-              // THE TRACKING LINE (MATCHES FIRESTORE MILESTONES)
+              // --- REAL-TIME TRACKING LINE (REACTIVE TO FIRESTORE) ---
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 20),
                 child: Column(
@@ -228,40 +285,76 @@ class _OrderCard extends StatelessWidget {
                         return Expanded(
                           child: Container(
                             height: 4,
-                            margin: const EdgeInsets.symmetric(horizontal: 2),
+                            margin: const EdgeInsets.symmetric(horizontal: 2.5),
                             decoration: BoxDecoration(
-                              color: isCompleted ? primaryColor : Colors.grey[200],
+                              color: isCompleted ? activeTrackingColor : Colors.grey[200],
                               borderRadius: BorderRadius.circular(2),
                             ),
                           ),
                         );
                       }),
                     ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: 10),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Text("Progress", style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.grey)),
-                        Text("${((currentStep + 1) / milestones.length * 100).toInt()}%", style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFFFE7F2D))),
+                        Text(
+                          isFailed ? "Order Terminated" : "Tracking Progress", 
+                          style: TextStyle(
+                            fontSize: 10, 
+                            fontWeight: FontWeight.bold, 
+                            color: isFailed ? Colors.red.withOpacity(0.7) : Colors.grey.shade400
+                          )
+                        ),
+                        Text(
+                          "${((currentStep + 1) / milestones.length * 100).toInt()}%", 
+                          style: TextStyle(
+                            fontSize: 11, 
+                            fontWeight: FontWeight.w900, 
+                            color: activeTrackingColor
+                          )
+                        ),
                       ],
                     ),
                   ],
                 ),
               ),
 
-              const SizedBox(height: 15),
+              const SizedBox(height: 20),
 
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
-                decoration: BoxDecoration(color: Colors.grey.shade50.withOpacity(0.5), borderRadius: const BorderRadius.vertical(bottom: Radius.circular(24))),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade50.withOpacity(0.7), 
+                  borderRadius: const BorderRadius.vertical(bottom: Radius.circular(24))
+                ),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text("TOTAL PAID", style: TextStyle(color: Colors.grey.shade400, fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 0.5)),
-                      Text('₦${order.totalAmount.toStringAsFixed(0)}', style: TextStyle(color: primaryColor, fontWeight: FontWeight.w900, fontSize: 18)),
-                    ]),
-                    const Row(children: [Text("Details", style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.black54)), SizedBox(width: 5), Icon(Icons.arrow_forward_ios_rounded, size: 14, color: Colors.grey)]),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start, 
+                      children: [
+                        Text(
+                          "TOTAL PAID", 
+                          style: TextStyle(color: Colors.grey.shade400, fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 0.5)
+                        ),
+                        Text(
+                          '₦${order.totalAmount.toStringAsFixed(0)}', 
+                          style: TextStyle(
+                            color: activeTrackingColor, 
+                            fontWeight: FontWeight.w900, 
+                            fontSize: 18
+                          )
+                        ),
+                      ]
+                    ),
+                    Row(
+                      children: const [
+                        Text("View Details", style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.black54)), 
+                        SizedBox(width: 5), 
+                        Icon(Icons.arrow_forward_ios_rounded, size: 14, color: Colors.grey)
+                      ]
+                    ),
                   ],
                 ),
               ),
@@ -273,9 +366,10 @@ class _OrderCard extends StatelessWidget {
   }
 
   Color _getStatusColor(String status) {
-    if (status.contains('DELIVERED') || status.contains('COLLECTED')) return Colors.green;
-    if (status.contains('CANCELLED')) return Colors.red;
-    if (status.contains('WAY') || status.contains('TRANSIT')) return Colors.blue;
-    return const Color(0xFFFE7F2D);
+    final s = status.toUpperCase();
+    if (s.contains('DELIVERED') || s.contains('COLLECTED') || s.contains('SUCCESS')) return Colors.green;
+    if (s.contains('CANCELLED') || s.contains('FAILED') || s.contains('REJECTED')) return Colors.red;
+    if (s.contains('WAY') || s.contains('TRANSIT') || s.contains('SHIPPED')) return Colors.blue;
+    return const Color(0xFFFE7F2D); 
   }
 }
