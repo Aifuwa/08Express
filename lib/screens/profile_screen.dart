@@ -307,8 +307,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               _buildDivider(),
               _buildTile(Icons.shopping_bag, primaryColor, "My Orders", () => Navigator.push(context, MaterialPageRoute(builder: (_) => const MyOrdersScreen()))),
               _buildDivider(),
-              _buildTile(Icons.support_agent_rounded, Colors.orange, "Contact Support Hub", () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SupportScreen()))),
-              _buildDivider(),
+            
               _buildTile(Icons.lock, Colors.purple, "Change Password", _showChangePasswordDialog),
               _buildDivider(),
               _buildTile(Icons.delete_forever, Colors.red, "Delete Account", _showDeleteAccountDialog),
@@ -321,6 +320,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
               _buildTile(Icons.description, Colors.indigo, "Terms & Conditions", _showTermsAndConditions),
               _buildDivider(),
               _buildTile(Icons.assignment_return, Colors.amber.shade800, "Refund & Return Policy", _showRefundPolicy),
+              _buildDivider(),
+              _buildTile(Icons.support_agent_rounded, Colors.orange, "Contact Support Hub", () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SupportScreen()))),
               _buildDivider(),
               _buildTile(Icons.headset_mic, Colors.pink, "Contact Us", _showContactUs),
             ]),

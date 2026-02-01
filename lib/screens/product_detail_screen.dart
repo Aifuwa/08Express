@@ -1,9 +1,9 @@
-import 'dart:ui'; 
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:eight_express/models/product.dart';
 import 'package:eight_express/providers/cart_provider.dart';
-import 'package:eight_express/screens/cart_screen.dart'; 
+import 'package:eight_express/screens/cart_screen.dart';
 
 class ProductDetailScreen extends StatefulWidget {
   final Product product;
@@ -16,11 +16,24 @@ class ProductDetailScreen extends StatefulWidget {
 
 class _ProductDetailScreenState extends State<ProductDetailScreen> {
   int _quantity = 1;
+  int _currentImageIndex = 0; // Tracks the current slide
 
   void _increaseQuantity() {
-    setState(() {
-      _quantity++;
-    });
+    // Check if current quantity is less than available stock
+    if (_quantity < widget.product.stock) {
+      setState(() {
+        _quantity++;
+      });
+    } else {
+      // Show warning if user tries to exceed stock
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Sorry, only ${widget.product.stock} items available.'),
+          backgroundColor: Colors.red,
+          duration: const Duration(milliseconds: 1500),
+        ),
+      );
+    }
   }
 
   void _decreaseQuantity() {
@@ -31,10 +44,11 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
     }
   }
 
-  // --- NEW: Manual Input Dialog ---
+  // --- Manual Input Dialog ---
   Future<void> _showManualQuantityDialog() async {
-    TextEditingController qtyController = TextEditingController(text: _quantity.toString());
-    
+    TextEditingController qtyController =
+        TextEditingController(text: _quantity.toString());
+
     String? result = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -55,7 +69,8 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, qtyController.text),
-            child: const Text('Set', style: TextStyle(color: Color(0xFFFE7F2D))),
+            child:
+                const Text('Set', style: TextStyle(color: Color(0xFFFE7F2D))),
           ),
         ],
       ),
@@ -64,11 +79,22 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
     if (result != null && result.isNotEmpty) {
       int? val = int.tryParse(result);
       if (val != null && val > 0) {
-        // Optional: Check stock limits if needed
-        // if (val > widget.product.stock) val = widget.product.stock;
-        
+        // Validation: Cannot order more than stock
+        if (val > widget.product.stock) {
+          val = widget.product.stock;
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text(
+                    'Quantity adjusted to maximum stock (${widget.product.stock})'),
+                backgroundColor: Colors.orange,
+              ),
+            );
+          }
+        }
+
         setState(() {
-          _quantity = val;
+          _quantity = val!;
         });
       }
     }
@@ -78,11 +104,17 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
   Widget build(BuildContext context) {
     final Size size = MediaQuery.of(context).size;
     const Color orangeColor = Color(0xFFFE7F2D);
+    
+    // Logic for Stock Display
     final bool isOutOfStock = widget.product.stock <= 0;
+    final bool isLowStock = !isOutOfStock && widget.product.stock <= 10;
+    
+    // Check if we have reached max capacity for the + button
+    final bool isMaxStockReached = _quantity >= widget.product.stock;
 
     return Scaffold(
       backgroundColor: Colors.white,
-      extendBodyBehindAppBar: true, 
+      extendBodyBehindAppBar: true,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
@@ -105,7 +137,8 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                     onTap: () {
                       Navigator.push(
                         context,
-                        MaterialPageRoute(builder: (context) => const CartScreen()),
+                        MaterialPageRoute(
+                            builder: (context) => const CartScreen()),
                       );
                     },
                   ),
@@ -121,7 +154,10 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                         ),
                         child: Text(
                           '${cart.itemCount}',
-                          style: const TextStyle(fontSize: 10, color: Colors.white, fontWeight: FontWeight.bold),
+                          style: const TextStyle(
+                              fontSize: 10,
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold),
                         ),
                       ),
                     )
@@ -132,26 +168,67 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
         ],
       ),
       body: SingleChildScrollView(
-        padding: const EdgeInsets.only(bottom: 100), 
+        padding: const EdgeInsets.only(bottom: 100),
         child: Column(
           children: [
-            // 1. IMAGE
+            // 1. IMAGE CAROUSEL (Updated for Multiple Images)
             SizedBox(
               height: size.height * 0.45,
               width: double.infinity,
               child: Stack(
                 children: [
-                  Positioned.fill(
-                    child: Hero(
-                      tag: 'productImage${widget.product.id}',
-                      child: Image.network(
-                        widget.product.imageUrl,
-                        fit: BoxFit.cover,
-                        errorBuilder: (context, error, stackTrace) =>
-                            Container(color: Colors.grey[100], child: const Center(child: Icon(Icons.broken_image, size: 50, color: Colors.grey))),
-                      ),
-                    ),
+                  PageView.builder(
+                    itemCount: widget.product.images.isNotEmpty 
+                        ? widget.product.images.length 
+                        : 1,
+                    onPageChanged: (index) {
+                      setState(() {
+                        _currentImageIndex = index;
+                      });
+                    },
+                    itemBuilder: (context, index) {
+                      // Logic: Use the list if available, else fallback to single imageUrl
+                      String imgUrl = widget.product.images.isNotEmpty
+                          ? widget.product.images[index]
+                          : widget.product.imageUrl;
+
+                      // Hero Tag Logic: Only match the Grid tag on the first image to avoid errors
+                      String heroTag = (index == 0) 
+                          ? 'productImage${widget.product.id}' 
+                          : 'productImage${widget.product.id}_$index';
+
+                      return Hero(
+                        tag: heroTag,
+                        child: Image.network(
+                          imgUrl,
+                          fit: BoxFit.cover,
+                          loadingBuilder: (context, child, loadingProgress) {
+                            if (loadingProgress == null) return child;
+                            return Container(
+                              color: Colors.grey[100],
+                              child: Center(
+                                child: CircularProgressIndicator(
+                                  value: loadingProgress.expectedTotalBytes != null
+                                      ? loadingProgress.cumulativeBytesLoaded /
+                                          loadingProgress.expectedTotalBytes!
+                                      : null,
+                                  color: orangeColor,
+                                ),
+                              ),
+                            );
+                          },
+                          errorBuilder: (context, error, stackTrace) => Container(
+                            color: Colors.grey[100],
+                            child: const Center(
+                              child: Icon(Icons.broken_image, size: 50, color: Colors.grey),
+                            ),
+                          ),
+                        ),
+                      );
+                    },
                   ),
+
+                  // Bottom Gradient
                   Positioned(
                     bottom: 0,
                     left: 0,
@@ -162,11 +239,41 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                         gradient: LinearGradient(
                           begin: Alignment.topCenter,
                           end: Alignment.bottomCenter,
-                          colors: [Colors.transparent, Colors.black.withOpacity(0.1)],
+                          colors: [
+                            Colors.transparent,
+                            Colors.black.withOpacity(0.1)
+                          ],
                         ),
                       ),
                     ),
                   ),
+
+                  // Dot Indicators (Only show if more than 1 image)
+                  if (widget.product.images.length > 1)
+                    Positioned(
+                      bottom: 40,
+                      left: 0,
+                      right: 0,
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: List.generate(
+                          widget.product.images.length,
+                          (index) => AnimatedContainer(
+                            duration: const Duration(milliseconds: 300),
+                            margin: const EdgeInsets.symmetric(horizontal: 4),
+                            height: 8,
+                            width: _currentImageIndex == index ? 20 : 8,
+                            decoration: BoxDecoration(
+                              color: _currentImageIndex == index 
+                                  ? orangeColor 
+                                  : Colors.white.withOpacity(0.8),
+                              borderRadius: BorderRadius.circular(4),
+                              boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)]
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -180,7 +287,10 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                   color: Colors.white,
                   borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
                   boxShadow: [
-                    BoxShadow(color: Colors.black12, blurRadius: 20, offset: Offset(0, -5))
+                    BoxShadow(
+                        color: Colors.black12,
+                        blurRadius: 20,
+                        offset: Offset(0, -5))
                   ],
                 ),
                 padding: const EdgeInsets.fromLTRB(20, 10, 20, 20),
@@ -200,7 +310,8 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                     ),
 
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 5),
                       decoration: BoxDecoration(
                         color: orangeColor.withOpacity(0.1),
                         borderRadius: BorderRadius.circular(8),
@@ -245,6 +356,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                     ),
                     const SizedBox(height: 15),
 
+                    // --- STOCK STATUS ROW UPDATED ---
                     Row(
                       children: [
                         Container(
@@ -252,32 +364,44 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                           height: 8,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
-                            color: isOutOfStock ? Colors.red : Colors.green,
+                            color: isOutOfStock
+                                ? Colors.red
+                                : (isLowStock ? Colors.orange : Colors.green),
                           ),
                         ),
                         const SizedBox(width: 8),
                         Text(
-                          isOutOfStock ? 'Out of Stock' : 'In Stock ',
+                          isOutOfStock
+                              ? 'Out of Stock'
+                              : (isLowStock
+                                  ? 'Only ${widget.product.stock} left!'
+                                  : 'In Stock'),
                           style: TextStyle(
-                            color: isOutOfStock ? Colors.red : Colors.green[700],
+                            color: isOutOfStock
+                                ? Colors.red
+                                : (isLowStock
+                                    ? Colors.orange
+                                    : Colors.green[700]),
                             fontWeight: FontWeight.w600,
                           ),
                         ),
                       ],
                     ),
-                    
+
                     const SizedBox(height: 25),
                     const Divider(height: 1, color: Colors.black12),
                     const SizedBox(height: 25),
 
                     const Text(
                       "Description",
-                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                      style:
+                          TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                     ),
                     const SizedBox(height: 10),
                     Text(
                       widget.product.description,
-                      style: TextStyle(fontSize: 15, height: 1.6, color: Colors.grey[600]),
+                      style: TextStyle(
+                          fontSize: 15, height: 1.6, color: Colors.grey[600]),
                     ),
 
                     const SizedBox(height: 30),
@@ -286,12 +410,14 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                     if (!isOutOfStock) ...[
                       const Text(
                         "Quantity",
-                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                        style: TextStyle(
+                            fontSize: 18, fontWeight: FontWeight.bold),
                       ),
                       const SizedBox(height: 15),
                       Container(
                         width: 140,
-                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 5),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 5, vertical: 5),
                         decoration: BoxDecoration(
                           color: Colors.grey[100],
                           borderRadius: BorderRadius.circular(30),
@@ -312,29 +438,34 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                 child: const Icon(Icons.remove, size: 18),
                               ),
                             ),
-                            
+
                             // --- CLICKABLE QUANTITY TEXT ---
                             GestureDetector(
                               onTap: _showManualQuantityDialog,
                               child: Padding(
-                                padding: const EdgeInsets.symmetric(horizontal: 8.0),
+                                padding:
+                                    const EdgeInsets.symmetric(horizontal: 8.0),
                                 child: Text(
                                   '$_quantity',
-                                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                                  style: const TextStyle(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.bold),
                                 ),
                               ),
                             ),
-                            
+
                             GestureDetector(
-                              onTap: _increaseQuantity,
+                              onTap: isMaxStockReached ? null : _increaseQuantity,
                               child: Container(
                                 width: 35,
                                 height: 35,
-                                decoration: const BoxDecoration(
-                                  color: Colors.black, 
+                                decoration: BoxDecoration(
+                                  // Change color if max stock reached
+                                  color: isMaxStockReached ? Colors.grey : Colors.black,
                                   shape: BoxShape.circle,
                                 ),
-                                child: const Icon(Icons.add, color: Colors.white, size: 18),
+                                child: const Icon(Icons.add,
+                                    color: Colors.white, size: 18),
                               ),
                             ),
                           ],
@@ -348,7 +479,8 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
           ],
         ),
       ),
-      
+
+      // --- FIXED GRADIENT BUTTON SECTION ---
       bottomNavigationBar: Container(
         padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 15.0),
         decoration: BoxDecoration(
@@ -362,57 +494,66 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
           ],
         ),
         child: SafeArea(
-          child: SizedBox(
+          child: Container(
             height: 55,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(15),
+              gradient: !isOutOfStock
+                  ? const LinearGradient(
+                      colors: [Color(0xFFFE7F2D), Color(0xFFFFB347)],
+                      begin: Alignment.centerLeft,
+                      end: Alignment.centerRight,
+                    )
+                  : const LinearGradient(
+                      colors: [Colors.grey, Colors.grey]),
+              boxShadow: !isOutOfStock
+                  ? [
+                      BoxShadow(
+                        color: orangeColor.withOpacity(0.4),
+                        blurRadius: 10,
+                        offset: const Offset(0, 5),
+                      )
+                    ]
+                  : [],
+            ),
             child: ElevatedButton.icon(
               onPressed: !isOutOfStock
                   ? () {
-                      Provider.of<CartProvider>(context, listen: false)
+                      bool success = Provider.of<CartProvider>(context, listen: false)
                           .addItem(widget.product, quantity: _quantity);
-                      
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text('$_quantity x ${widget.product.name} added!'),
-                          behavior: SnackBarBehavior.floating,
-                          backgroundColor: Colors.green,
-                          duration: const Duration(seconds: 1),
-                        ),
-                      );
+
+                      if (success) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('$_quantity x ${widget.product.name} added!'),
+                            behavior: SnackBarBehavior.floating,
+                            backgroundColor: Colors.green,
+                            duration: const Duration(seconds: 1),
+                          ),
+                        );
+                      } else {
+                         ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Cannot add. Maximum stock reached in cart.'),
+                            behavior: SnackBarBehavior.floating,
+                            backgroundColor: Colors.red,
+                            duration: Duration(seconds: 2),
+                          ),
+                        );
+                      }
                     }
                   : null,
-              icon: Icon(isOutOfStock ? Icons.remove_shopping_cart : Icons.shopping_bag_outlined),
+              icon: Icon(isOutOfStock
+                  ? Icons.remove_shopping_cart
+                  : Icons.shopping_bag_outlined),
               label: Text(isOutOfStock ? 'Sold Out' : 'Add to Cart'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.transparent,
-                foregroundColor: Colors.white,
                 shadowColor: Colors.transparent,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(15)),
                 textStyle: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              ).copyWith(
-                backgroundBuilder: (context, states, child) {
-                  return Container(
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(15),
-                      gradient: !isOutOfStock
-                          ? const LinearGradient(
-                              colors: [Color(0xFFFE7F2D), Color(0xFFFFB347)],
-                              begin: Alignment.centerLeft,
-                              end: Alignment.centerRight,
-                            )
-                          : const LinearGradient(colors: [Colors.grey, Colors.grey]),
-                      boxShadow: !isOutOfStock
-                          ? [
-                              BoxShadow(
-                                color: orangeColor.withOpacity(0.4),
-                                blurRadius: 10,
-                                offset: const Offset(0, 5),
-                              )
-                            ]
-                          : [],
-                    ),
-                    child: child,
-                  );
-                },
               ),
             ),
           ),
@@ -421,7 +562,8 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
     );
   }
 
-  Widget _buildGlassIcon({required IconData icon, required VoidCallback onTap}) {
+  Widget _buildGlassIcon(
+      {required IconData icon, required VoidCallback onTap}) {
     return ClipRRect(
       borderRadius: BorderRadius.circular(30),
       child: BackdropFilter(

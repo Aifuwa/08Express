@@ -254,7 +254,9 @@ class _HomeScreenState extends State<HomeScreen> {
       drawer: _buildCustomDrawer(context),
       body: Column(children: [
         if (!isProfileScreen) _buildGradientHeader(context),
-        Expanded(child: _selectedIndex == 0 ? ProductListingScreen(searchQuery: _searchQuery) : _widgetOptions[_selectedIndex]),
+        Expanded(child: _selectedIndex == 0 
+          ? PaginatedHomeContent(searchQuery: _searchQuery) 
+          : _widgetOptions[_selectedIndex]),
       ]),
       bottomNavigationBar: _buildVibrantBottomNav(),
     );
@@ -286,7 +288,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   prefixIcon: Icon(Icons.search_rounded, color: _primaryColor), 
                   border: InputBorder.none, 
                   contentPadding: const EdgeInsets.symmetric(vertical: 15),
-                  filled: false, // Ensures rotating hint is visible behind
+                  filled: false, 
                 )
               ),
             ]),
@@ -358,7 +360,6 @@ class _HomeScreenState extends State<HomeScreen> {
         Container(width: double.infinity, padding: const EdgeInsets.fromLTRB(25, 70, 25, 40), decoration: BoxDecoration(gradient: LinearGradient(colors: [Colors.blue.shade900, _primaryColor], begin: Alignment.topLeft, end: Alignment.bottomRight), borderRadius: const BorderRadius.only(bottomRight: Radius.circular(50))), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           CircleAvatar(radius: 35, backgroundColor: Colors.white24, backgroundImage: user?.imageUrl != null ? NetworkImage(user!.imageUrl!) : null, child: user?.imageUrl == null ? Icon(isGuest ? Icons.account_circle : Icons.person, color: Colors.white, size: 40) : null),
           const SizedBox(height: 15),
-          // RESTORED: NAME AND EMAIL Display
           Text(isGuest ? "Hello, Guest" : (user?.name ?? "User"), style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
           Text(isGuest ? "Sign in to your account" : (user?.email ?? ""), style: TextStyle(color: Colors.white.withOpacity(0.9), fontSize: 13)),
         ])),
@@ -384,22 +385,316 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-class ProductListingScreen extends StatelessWidget {
+// ==========================================
+// PAGINATED HOME CONTENT (Robust Version)
+// ==========================================
+
+class PaginatedHomeContent extends StatefulWidget {
   final String searchQuery;
-  const ProductListingScreen({super.key, this.searchQuery = ''});
+  const PaginatedHomeContent({super.key, this.searchQuery = ''});
+
+  @override
+  State<PaginatedHomeContent> createState() => _PaginatedHomeContentState();
+}
+
+class _PaginatedHomeContentState extends State<PaginatedHomeContent> {
+  final List<Product> _products = [];
+  bool _isLoading = false;
+  bool _hasMore = true;
+  String? _errorMessage; // Shows visual error on screen
+  DocumentSnapshot? _lastDocument;
+  static const int _limit = 20;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchProducts();
+  }
+
+  @override
+  void didUpdateWidget(covariant PaginatedHomeContent oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.searchQuery != oldWidget.searchQuery) {
+      _resetAndFetch();
+    }
+  }
+
+  void _resetAndFetch() {
+    setState(() {
+      _products.clear();
+      _lastDocument = null;
+      _hasMore = true;
+      _isLoading = false;
+      _errorMessage = null; 
+    });
+    _fetchProducts();
+  }
+
+  Future<void> _fetchProducts() async {
+    if (_isLoading || (!_hasMore && widget.searchQuery.isEmpty)) return;
+
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      Query query = FirebaseFirestore.instance.collection('products');
+
+      if (widget.searchQuery.isNotEmpty) {
+         // This REQUIRES a Firestore Index on 'name'
+         query = query.orderBy('name')
+             .startAt([widget.searchQuery])
+             .endAt(['${widget.searchQuery}\uf8ff'])
+             .limit(50);
+      } else {
+        // Standard Pagination
+        query = query.limit(_limit);
+        
+        if (_lastDocument != null) {
+          query = query.startAfterDocument(_lastDocument!);
+        }
+      }
+
+      final QuerySnapshot snapshot = await query.get();
+
+      if (snapshot.docs.isNotEmpty) {
+        _lastDocument = snapshot.docs.last;
+        final newProducts = snapshot.docs.map((doc) => Product.fromFirestore(doc)).toList();
+        
+        if (mounted) {
+          setState(() {
+            _products.addAll(newProducts);
+            if (snapshot.docs.length < _limit) _hasMore = false;
+          });
+        }
+      } else {
+        if (mounted) setState(() => _hasMore = false);
+      }
+    } catch (e) {
+      debugPrint("Error fetching products: $e");
+      if (mounted) {
+        setState(() {
+          _errorMessage = "Could not load products.\nPlease check your connection.";
+        });
+      }
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  // Stock Logic Wrapper
+  Widget _buildProductWithStockCheck(Product product) {
+    bool isOutOfStock = product.stock <= 0;
+    bool isLowStock = product.stock > 0 && product.stock <= 10;
+    Widget content = ProductGridItem(key: ValueKey(product.id), product: product);
+
+    if (isOutOfStock) {
+      return AbsorbPointer(
+        child: Stack(
+          children: [
+            Opacity(opacity: 0.5, child: content),
+            Positioned.fill(
+              child: Center(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: const BoxDecoration(color: Colors.grey, borderRadius: BorderRadius.all(Radius.circular(6))),
+                  child: const Text("SOLD OUT", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (isLowStock) {
+      return Stack(
+        children: [
+          content,
+          Positioned(
+            top: 6,
+            left: 6,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.red.withOpacity(0.9),
+                borderRadius: BorderRadius.circular(6),
+                boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)]
+              ),
+              child: Text(
+                "Only ${product.stock} left!",
+                style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+    return content;
+  }
+
+  // Category Wrapper
+  Widget _buildCategorySection(String title, String filterKey, Color themeColor, {bool isBrand = false}) {
+    Query q = FirebaseFirestore.instance.collection('products').limit(8);
+    
+    return FutureBuilder<QuerySnapshot>(
+      future: q.get(), 
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+           return const SizedBox(height: 200, child: Center(child: CustomLoader(size: 30)));
+        }
+        
+        if (snapshot.hasError || !snapshot.hasData) return const SizedBox.shrink();
+        
+        var displayProducts = snapshot.data!.docs.map((d) => Product.fromFirestore(d)).where((p) {
+          final s = filterKey.toLowerCase();
+          return p.name.toLowerCase().contains(s) || 
+                 (p.category != null && p.category!.toLowerCase().contains(s)) ||
+                 (p.description != null && p.description!.toLowerCase().contains(s));
+        }).toList();
+
+        if (displayProducts.isEmpty) return const SizedBox.shrink();
+
+        return Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 25, 16, 12),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    children: [
+                      Container(width: 4, height: 18, decoration: BoxDecoration(color: themeColor, borderRadius: BorderRadius.circular(2))),
+                      const SizedBox(width: 8),
+                      Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800, letterSpacing: 0.3)),
+                    ],
+                  ),
+                  Text("See All", style: TextStyle(color: themeColor, fontWeight: FontWeight.bold, fontSize: 13)),
+                ],
+              ),
+            ),
+            SizedBox(
+              height: 270,
+              child: ListView.builder(
+                scrollDirection: Axis.horizontal,
+                physics: const BouncingScrollPhysics(),
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                itemCount: displayProducts.length,
+                itemBuilder: (ctx, i) => Container(
+                  width: 160,
+                  margin: const EdgeInsets.symmetric(horizontal: 6),
+                  child: _buildProductWithStockCheck(displayProducts[i]),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance.collection('products').snapshots(),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CustomLoader(size: 70));
-        if (!snapshot.hasData) return const Center(child: Text("No products found"));
-        var products = snapshot.data!.docs.map((doc) => Product.fromFirestore(doc)).toList();
-        if (searchQuery.isNotEmpty) {
-          products = products.where((p) => p.name.toLowerCase().contains(searchQuery.toLowerCase())).toList();
-        }
-        return GridView.builder(padding: const EdgeInsets.all(16), gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, childAspectRatio: 0.64, crossAxisSpacing: 15, mainAxisSpacing: 15), itemCount: products.length, itemBuilder: (context, index) => ProductGridItem(key: ValueKey(products[index].id), product: products[index]));
-      },
+    // --- ERROR STATE ---
+    if (_errorMessage != null && _products.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.error_outline, color: Colors.red, size: 50),
+            const SizedBox(height: 10),
+            Text(_errorMessage!, textAlign: TextAlign.center, style: const TextStyle(color: Colors.grey)),
+            const SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: _fetchProducts,
+              child: const Text("Retry"),
+            )
+          ],
+        ),
+      );
+    }
+
+    if (widget.searchQuery.isNotEmpty) {
+      if (_products.isEmpty && _isLoading) return const Center(child: CustomLoader(size: 60));
+      if (_products.isEmpty) return const Center(child: Text("No items match your search."));
+      
+      return GridView.builder(
+        padding: const EdgeInsets.all(16),
+        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, childAspectRatio: 0.64, crossAxisSpacing: 15, mainAxisSpacing: 15),
+        itemCount: _products.length,
+        itemBuilder: (ctx, i) => _buildProductWithStockCheck(_products[i]),
+      );
+    }
+
+    return SingleChildScrollView(
+      physics: const BouncingScrollPhysics(),
+      padding: const EdgeInsets.only(bottom: 40),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildCategorySection("Food & Beverages", "food", Colors.orange.shade800),
+          _buildCategorySection("Nestle", "nestle", Colors.blue.shade800, isBrand: true),
+          _buildCategorySection("Household & Cleaning", "household", Colors.teal.shade700),
+          
+          const Divider(height: 40, thickness: 8, color: Color(0xFFEEEEEE)),
+
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            child: Row(children: [
+              const Icon(Icons.flash_on_rounded, color: Colors.amber, size: 20),
+              const SizedBox(width: 8),
+              Text("Just For You", style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: Colors.grey.shade800)),
+            ]),
+          ),
+          
+          if (_products.isEmpty && _isLoading)
+            const Padding(padding: EdgeInsets.all(40), child: Center(child: CustomLoader(size: 50)))
+          else if (_products.isEmpty && !_isLoading)
+            const Padding(
+              padding: EdgeInsets.all(40), 
+              child: Center(child: Text("No products found.", style: TextStyle(color: Colors.grey)))
+            )
+          else
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: GridView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 2, childAspectRatio: 0.64, crossAxisSpacing: 12, mainAxisSpacing: 12
+                ),
+                itemCount: _products.length,
+                itemBuilder: (ctx, i) => _buildProductWithStockCheck(_products[i]),
+              ),
+            ),
+
+          if (_hasMore)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 40),
+              child: _isLoading 
+                ? const Center(child: CustomLoader(size: 30))
+                : ElevatedButton(
+                    onPressed: _fetchProducts,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.white,
+                      foregroundColor: Colors.black,
+                      elevation: 0,
+                      side: BorderSide(color: Colors.grey.shade300),
+                      minimumSize: const Size(double.infinity, 45),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(25))
+                    ),
+                    child: const Text("LOAD MORE PRODUCTS"),
+                  ),
+            ),
+            
+           if (!_hasMore && _products.isNotEmpty)
+             const Padding(
+               padding: EdgeInsets.all(20),
+               child: Center(child: Text("You've reached the end!", style: TextStyle(color: Colors.grey, fontSize: 12))),
+             )
+        ],
+      ),
     );
   }
 }

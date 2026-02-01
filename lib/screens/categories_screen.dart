@@ -18,10 +18,19 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
   @override
   void initState() {
     super.initState();
-    // Trigger the fetch logic when the screen is initialized
+    // Trigger the fetch logic only if the list is empty to save reads,
+    // otherwise the user can pull-to-refresh.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      Provider.of<CategoryProvider>(context, listen: false).fetchCategories();
+      final provider = Provider.of<CategoryProvider>(context, listen: false);
+      if (provider.categories.isEmpty) {
+        provider.fetchCategories();
+      }
     });
+  }
+
+  // Logic for pull-to-refresh
+  Future<void> _refreshCategories() async {
+    await Provider.of<CategoryProvider>(context, listen: false).fetchCategories();
   }
 
   @override
@@ -36,7 +45,7 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
         children: [
           // --- HEADER SECTION ---
           Container(
-            padding: const EdgeInsets.fromLTRB(20, 60, 20, 15), // Adjusted padding for top status bar
+            padding: const EdgeInsets.fromLTRB(20, 60, 20, 15), 
             color: backgroundColor,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -87,21 +96,26 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
                   return _buildEmptyView(categoryProvider, orangeColor);
                 }
 
-                // 5. Data Grid
-                return GridView.builder(
-                  padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 10.0),
-                  physics: const BouncingScrollPhysics(),
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 2,
-                    crossAxisSpacing: 15.0,
-                    mainAxisSpacing: 15.0,
-                    childAspectRatio: 0.85, 
+                // 5. Data Grid with Refresh Indicator
+                return RefreshIndicator(
+                  onRefresh: _refreshCategories,
+                  color: orangeColor,
+                  child: GridView.builder(
+                    padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 10.0),
+                    // AlwaysScrollableScrollPhysics is crucial for RefreshIndicator to work even if list is short
+                    physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
+                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 2,
+                      crossAxisSpacing: 15.0,
+                      mainAxisSpacing: 15.0,
+                      childAspectRatio: 0.85, 
+                    ),
+                    itemCount: activeCategories.length,
+                    itemBuilder: (context, index) {
+                      final category = activeCategories[index];
+                      return CategoryGridItem(category: category, accentColor: orangeColor);
+                    },
                   ),
-                  itemCount: activeCategories.length,
-                  itemBuilder: (context, index) {
-                    final category = activeCategories[index];
-                    return CategoryGridItem(category: category, accentColor: orangeColor);
-                  },
                 );
               },
             ),
