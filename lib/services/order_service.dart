@@ -11,12 +11,14 @@ class OrderService with ChangeNotifier {
 
   OrderService(this._userProvider, this._cartProvider);
 
-  // UPDATED: Added parameters to match your AppOrder model requirements
+  /// Places an order, reduces product stock, and generates a notification 
+  /// all in a single ATOMIC batch to ensure data integrity.
   Future<void> placeOrder({
     required String address,
     required double deliveryFee,
     required String method,
   }) async {
+    // 1. Validation Guards
     if (!_userProvider.isAuthenticated || _userProvider.firebaseUser == null) {
       throw Exception('Authentication required to place an order.');
     }
@@ -26,44 +28,77 @@ class OrderService with ChangeNotifier {
 
     final String userId = _userProvider.firebaseUser!.uid;
     
-    // Map cart items to order items
+    // 2. Prepare Order Items
     final List<OrderItem> orderItemsList = _cartProvider.items.values
         .map((cartItem) => OrderItem.fromCartItem(cartItem))
         .toList();
         
     final double totalAmount = _cartProvider.totalAmount + deliveryFee;
 
-    try {
-      // 1. Create a document reference to get the ID first
-      DocumentReference orderDocRef = _firestore.collection('orders').doc();
+    // --- START WRITE BATCH ---
+    // This makes the operation "All or Nothing". 
+    // If the stock update fails, the order is not placed.
+    WriteBatch batch = _firestore.batch();
 
-      // 2. Prepare the data using the EXACT keys from your AppOrder.fromFirestore
+    try {
+      // 3. Create Order Document Reference
+      DocumentReference orderDocRef = _firestore.collection('orders').doc();
+      
       final orderData = {
         'userId': userId,
         'totalAmount': totalAmount,
         'deliveryFee': deliveryFee,
         'shippingAddress': address,
         'deliveryMethod': method,
-        'orderItems': orderItemsList.map((item) => item.toMap()).toList(), // FIX: changed 'items' to 'orderItems'
+        'orderItems': orderItemsList.map((item) => item.toMap()).toList(),
         'orderDate': FieldValue.serverTimestamp(),
         'status': 'pending',
       };
 
-      // 3. Save to Firestore
-      await orderDocRef.set(orderData);
+      // 4. ADD TO BATCH: Create the Order Document
+      batch.set(orderDocRef, orderData);
 
-      debugPrint('Order placed successfully! ID: ${orderDocRef.id}');
+      // 5. ADD TO BATCH: Reduce Stock for each product in the cart
+      // This is Part 1 of your request: subtracting quantity from original stock.
+      _cartProvider.items.forEach((productId, cartItem) {
+        DocumentReference productRef = _firestore.collection('products').doc(productId);
+        
+        batch.update(productRef, {
+          // Use negative value with FieldValue.increment to subtract from the server-side value
+          'stock': FieldValue.increment(-cartItem.quantity),
+        });
+      });
 
-      // 4. Clear the cart
+      // 6. ADD TO BATCH: Generate Confirmation Notification
+      DocumentReference notificationRef = _firestore.collection('notifications').doc();
+      final notificationData = {
+        'userId': userId,
+        'title': 'Order Placed Successfully! 🎉',
+        'body': 'Your order for ${orderItemsList.length} items (Total: ₦${totalAmount.toStringAsFixed(0)}) has been received.',
+        'timestamp': FieldValue.serverTimestamp(),
+        'isRead': false,
+        'type': 'order_confirmation',
+        'orderId': orderDocRef.id,
+      };
+      batch.set(notificationRef, notificationData);
+
+      // 7. COMMIT THE ATOMIC BATCH
+      // This sends all operations to Firebase to be executed simultaneously.
+      await batch.commit();
+
+      debugPrint('Order placed, stock reduced, and notification sent! ID: ${orderDocRef.id}');
+
+      // 8. Clear the local cart and notify UI
       _cartProvider.clearCart();
       notifyListeners();
 
     } catch (e) {
-      debugPrint('Error placing order: $e');
-      throw Exception('Failed to place order: $e');
+      debugPrint('Transaction Error in placeOrder: $e');
+      throw Exception('Failed to process order and update stock: $e');
     }
   }
 
+  /// Streams the list of orders for the currently logged-in user
   Stream<List<AppOrder>> getUserOrders() {
     if (!_userProvider.isAuthenticated || _userProvider.firebaseUser == null) {
       return Stream.value([]);
@@ -74,7 +109,7 @@ class OrderService with ChangeNotifier {
     return _firestore
         .collection('orders')
         .where('userId', isEqualTo: userId)
-        .orderBy('orderDate', descending: true) // REMINDER: Create the Composite Index in Firebase Console
+        .orderBy('orderDate', descending: true) 
         .snapshots()
         .map((snapshot) {
           return snapshot.docs.map((doc) => AppOrder.fromFirestore(doc)).toList();

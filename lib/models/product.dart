@@ -1,4 +1,3 @@
-// lib/models/product.dart
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class Product {
@@ -10,6 +9,7 @@ class Product {
   final List<String> images; // NEW: List of all images
   final String category; 
   final int stock;
+  final int maxPurchaseLimit; // NEW: Limit per customer (0 = unlimited)
   final Timestamp createdAt;
   final bool active;
 
@@ -22,12 +22,13 @@ class Product {
     required this.images,
     required this.category,
     required this.stock,
+    required this.maxPurchaseLimit, // Added to constructor
     required this.createdAt,
     this.active = true,
   });
 
   factory Product.fromFirestore(DocumentSnapshot doc) {
-    Map<String, dynamic> data = doc.data() as Map<String, dynamic>;
+    Map<String, dynamic> data = doc.data() as Map<String, dynamic>? ?? {};
 
     // 1. Handle Multiple Images Logic
     List<String> parsedImages = [];
@@ -51,6 +52,8 @@ class Product {
       images: parsedImages,
       category: data['category'] ?? 'Uncategorized',
       stock: (data['stock'] ?? 0).toInt(),
+      // Handle maxPurchaseLimit from Firestore (default to 0 if not set)
+      maxPurchaseLimit: (data['maxPurchaseLimit'] ?? 0).toInt(),
       createdAt: data['createdAt'] ?? Timestamp.now(),
       active: data['active'] ?? true,
     );
@@ -65,6 +68,7 @@ class Product {
       'images': images, // Save the list back to Firestore
       'category': category,
       'stock': stock,
+      'maxPurchaseLimit': maxPurchaseLimit, // Added to write logic
       'createdAt': createdAt,
       'active': active,
     };

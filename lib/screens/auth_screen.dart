@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import 'package:eight_express/providers/user_provider.dart';
 import 'package:eight_express/constants/legal_texts.dart';
 import 'package:eight_express/widgets/custom_loader.dart';
+import 'package:eight_express/screens/home_screen.dart'; // Ensure this is imported
 
 class AuthScreen extends StatefulWidget {
   const AuthScreen({super.key});
@@ -36,9 +37,24 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
 
   // --- TRANSITION TRIGGER ---
   // Tells the Provider to show the blurred loading overlay
-  Future<void> _triggerTransition() async {
+  // and navigates to Home with the correct 'isNewUser' flag
+  Future<void> _triggerTransition(bool isNew) async {
     final userProv = Provider.of<UserProvider>(context, listen: false);
-    await userProv.startLoginTransition();
+    
+    // Start the professional blurred loader
+    userProv.startLoginTransition();
+
+    // Small delay to let the transition animation feel smooth
+    await Future.delayed(const Duration(milliseconds: 1500));
+
+    if (mounted) {
+      Navigator.pushReplacement(
+        context, 
+        MaterialPageRoute(
+          builder: (_) => HomeScreen(isNewUser: isNew),
+        ),
+      );
+    }
   }
 
   // --- LEGAL MODAL HELPER ---
@@ -97,13 +113,11 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
     const Color midBlue = Color(0xFF1976D2);
     const Color lightBlue = Color(0xFF42A5F5);
 
-    // KEYBOARD DETECTION: Used to prevent the "25px overflow" error
     final double keyboardPadding = MediaQuery.of(context).viewInsets.bottom;
     final bool isKeyboardOpen = keyboardPadding > 0;
     final userProv = Provider.of<UserProvider>(context);
 
     return Scaffold(
-      // Ensure the scaffold resizes to make room for keyboard
       resizeToAvoidBottomInset: true,
       backgroundColor: Colors.white,
       body: Stack(
@@ -114,7 +128,6 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
               useMaterial3: true,
               brightness: Brightness.light,
               colorScheme: ColorScheme.fromSeed(seedColor: orange, primary: orange),
-              // --- VISIBLE INPUT BORDERS ---
               inputDecorationTheme: InputDecorationTheme(
                 filled: true,
                 fillColor: Colors.white,
@@ -144,13 +157,11 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
             ),
             child: SignInScreen(
               providers: [EmailAuthProvider(), PhoneAuthProvider()],
-              // DYNAMIC HEADER: Shrinks when keyboard is open to prevent the 25px overflow
               headerMaxExtent: isKeyboardOpen ? 120 : 230,
               headerBuilder: (context, constraints, shrinkOffset) {
                 return Container(
                   width: double.infinity,
                   decoration: const BoxDecoration(
-                    // --- PREMIUM SUNRISE GRADIENT ---
                     gradient: LinearGradient(
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
@@ -192,7 +203,6 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
                   padding: const EdgeInsets.only(top: 25, bottom: 10),
                   child: Column(
                     children: [
-                      // MODERN LEGAL TEXT (Implied Consent)
                       RichText(
                         textAlign: TextAlign.center,
                         text: TextSpan(
@@ -219,17 +229,18 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
                 );
               },
               actions: [
+                // ACTION: EXISTING USER SIGN IN
                 AuthStateChangeAction<SignedIn>((context, state) async {
-                  await _triggerTransition();
+                  await _triggerTransition(false); // Flag as NOT a new user
                 }),
+                // ACTION: NEW USER REGISTRATION
                 AuthStateChangeAction<UserCreated>((context, state) async {
                   final user = state.credential.user;
                   if (user != null) {
                     await userProv.createInitialUserDocument(user);
-                    await _triggerTransition();
+                    await _triggerTransition(true); // Flag as a NEW user
                   }
                 }),
-                // --- CORRECTED FORGOT PASSWORD ACTION ---
                 ForgotPasswordAction((context, email) {
                   Navigator.push(
                     context, 
@@ -245,7 +256,7 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
             ),
           ),
 
-          // 2. PREMIUM TRANSITION OVERLAY (The Professional Loader)
+          // 2. PREMIUM TRANSITION OVERLAY
           if (userProv.isTransitioning)
             Positioned.fill(
               child: BackdropFilter(
