@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart'; // <--- Added this import
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:package_info_plus/package_info_plus.dart'; 
 import 'package:url_launcher/url_launcher.dart'; 
@@ -68,10 +69,8 @@ class _HomeScreenState extends State<HomeScreen> {
     _searchController.addListener(_onSearchChanged);
     
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      // Only check onboarding if the user actually just registered
-      if (widget.isNewUser) {
-        _checkOnboarding();
-      }
+      // FIX: Call checkOnboarding always to handle app restarts where setup isn't complete
+      _checkOnboarding();
       _checkVersion(); 
       _showPromoPopup();
     });
@@ -86,23 +85,32 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
-  // --- LOGIC: ONBOARDING SHIELD (NEW USER ONLY) ---
+  // --- FIXED LOGIC: ROBUST ONBOARDING SHIELD ---
   void _checkOnboarding() async {
     final userProv = Provider.of<UserProvider>(context, listen: false);
     
-    // Wait for profile to load to ensure we have data
+    // 1. Wait for profile to load (Increased retries for slower connections)
     int retry = 0;
-    while (!userProv.isProfileLoaded && retry < 10) {
-      await Future.delayed(const Duration(milliseconds: 500));
+    while (!userProv.isProfileLoaded && retry < 20) {
+      await Future.delayed(const Duration(milliseconds: 250));
       retry++;
     }
 
-    // Modal ONLY shows if explicitly a new user AND setup is not done
-    if (userProv.isAuthenticated && userProv.isProfileLoaded) {
-      final user = userProv.appUser;
-      if (user?.setupComplete == false) {
-        _showOnboardingModal();
-      }
+    // 2. Safety Net: If Firebase says logged in, but AppUser is null/guest, force fetch
+    if (FirebaseAuth.instance.currentUser != null && userProv.appUser == null) {
+       await userProv.fetchUserProfile(); 
+    }
+
+    if (!mounted) return;
+
+    // 3. Check conditions
+    final user = userProv.appUser;
+    
+    // Show modal if user exists AND setup is NOT complete
+    if (user != null && (user.setupComplete == false)) {
+      // Small delay to ensure the bottom sheet opens smoothly
+      await Future.delayed(const Duration(milliseconds: 500));
+      if (mounted) _showOnboardingModal();
     }
   }
 

@@ -128,12 +128,13 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     return totalItems <= threshold ? standard : large;
   }
 
-  // INTELLIGENT ORDER PLACEMENT Logic
+  // --- UPDATED ORDER LOGIC WITH STOCK DEDUCTION ---
   Future<void> _placeOrder() async {
     final cartProvider = Provider.of<CartProvider>(context, listen: false);
 
     if (cartProvider.items.isEmpty) return;
     
+    // 1. Validations
     if (_selectedDeliveryMethod == DeliveryMethod.delivery && _selectedUserAddress == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please select a delivery address'), backgroundColor: Colors.red),
@@ -155,7 +156,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
     setState(() => _isUploading = true);
 
     try {
-      // 1. Upload Receipt to Firebase Storage
+      // 2. Upload Receipt to Storage
       final String fileName = 'receipts/${DateTime.now().millisecondsSinceEpoch}_${_pickedReceiptImage!.path.split('/').last}';
       final Reference storageRef = FirebaseStorage.instance.ref().child(fileName);
       final UploadTask uploadTask = storageRef.putFile(_pickedReceiptImage!);
@@ -164,17 +165,10 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
 
       if (!mounted) return;
 
-      // 2. Calculate Totals
+      // 3. Prepare Order Data
       final double deliveryFee = _calculateDeliveryFee(cartProvider);
       final double grandTotal = widget.totalAmount + deliveryFee;
-
-      final orderItems = cartProvider.items.values.map((cartItem) => {
-        'productId': cartItem.productId,
-        'productName': cartItem.name,
-        'price': cartItem.price,
-        'quantity': cartItem.quantity,
-        'imageUrl': cartItem.imageUrl,
-      }).toList();
+      final String method = _selectedDeliveryMethod.toString().split('.').last;
 
       String shippingAddress;
       if (_selectedDeliveryMethod == DeliveryMethod.pickup) {
@@ -184,28 +178,58 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
         shippingAddress = "${addr.street}, ${addr.city}, ${addr.state} ${addr.zipCode}, ${addr.country}";
       }
 
-      // 3. Save Order with Tracker Metadata
-      final String method = _selectedDeliveryMethod.toString().split('.').last; // "pickup" or "delivery"
+      final orderItems = cartProvider.items.values.map((cartItem) => {
+        'productId': cartItem.productId,
+        'productName': cartItem.name,
+        'price': cartItem.price,
+        'quantity': cartItem.quantity,
+        'imageUrl': cartItem.imageUrl,
+      }).toList();
 
-      await FirebaseFirestore.instance.collection('orders').add({
-        'userId': currentUser.uid,
-        'status': 'pending_receipt_verification', // Initial status
-        'orderDate': Timestamp.now(),
-        'subtotal': widget.totalAmount,
-        'deliveryFee': deliveryFee,
-        'totalAmount': grandTotal,
-        'deliveryMethod': method,
-        'shippingAddress': shippingAddress,
-        'receiptImageUrl': receiptImageUrl,
-        'orderItems': orderItems,
-        // Meta-data for the tracker to work intelligently
-        'trackingMilestones': method == 'pickup' 
-            ? ['Order Placed', 'Payment Verified', 'Processing', 'Ready for Pickup', 'Collected']
-            : ['Order Placed', 'Payment Verified', 'Processing', 'In Transit', 'Delivered'],
-        'currentStep': 0, 
-        'estimatedCompletion': _getDeliveryEstimate(),
+      // 4. RUN TRANSACTION: Deduct Stock AND Create Order atomically
+      await FirebaseFirestore.instance.runTransaction((transaction) async {
+        // Step A: Verify Stock Availability for ALL items
+        for (var cartItem in cartProvider.items.values) {
+          DocumentReference productRef = FirebaseFirestore.instance.collection('products').doc(cartItem.productId);
+          DocumentSnapshot productSnapshot = await transaction.get(productRef);
+
+          if (!productSnapshot.exists) {
+            throw Exception("Product '${cartItem.name}' no longer exists.");
+          }
+
+          int currentStock = productSnapshot.get('stock') ?? 0;
+          if (currentStock < cartItem.quantity) {
+             throw Exception("Stock Issue: '${cartItem.name}' only has $currentStock left.");
+          }
+
+          // Step B: Deduct Stock
+          transaction.update(productRef, {
+            'stock': currentStock - cartItem.quantity,
+          });
+        }
+
+        // Step C: Create Order Document
+        DocumentReference orderRef = FirebaseFirestore.instance.collection('orders').doc();
+        transaction.set(orderRef, {
+          'userId': currentUser.uid,
+          'status': 'pending_receipt_verification',
+          'orderDate': Timestamp.now(),
+          'subtotal': widget.totalAmount,
+          'deliveryFee': deliveryFee,
+          'totalAmount': grandTotal,
+          'deliveryMethod': method,
+          'shippingAddress': shippingAddress,
+          'receiptImageUrl': receiptImageUrl,
+          'orderItems': orderItems,
+          'trackingMilestones': method == 'pickup' 
+              ? ['Order Placed', 'Payment Verified', 'Processing', 'Ready for Pickup', 'Collected']
+              : ['Order Placed', 'Payment Verified', 'Processing', 'In Transit', 'Delivered'],
+          'currentStep': 0, 
+          'estimatedCompletion': _getDeliveryEstimate(),
+        });
       });
 
+      // 5. Success
       cartProvider.clearCart();
 
       if (mounted) {
@@ -213,11 +237,23 @@ class _CheckoutScreenState extends State<CheckoutScreen> {
           MaterialPageRoute(builder: (ctx) => const OrderSuccessScreen()),
         );
       }
+
     } catch (e) {
       _logger.e(e);
-      if (mounted) setState(() => _uploadMessage = 'Failed to place order. Check connection.');
+      String errorMsg = 'Failed to place order. Please try again.';
+
+      // Display friendly stock error
+      if (e.toString().contains("Stock Issue")) {
+        errorMsg = e.toString().replaceAll("Exception: ", "");
+      }
+
+      if (mounted) {
+        setState(() => _uploadMessage = errorMsg);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(errorMsg), backgroundColor: Colors.red, duration: const Duration(seconds: 4)),
+        );
+      }
     } finally {
-      // FIX: processing loader finally stops here
       if (mounted) setState(() => _isUploading = false);
     }
   }

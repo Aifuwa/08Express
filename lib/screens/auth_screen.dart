@@ -7,7 +7,7 @@ import 'package:provider/provider.dart';
 import 'package:eight_express/providers/user_provider.dart';
 import 'package:eight_express/constants/legal_texts.dart';
 import 'package:eight_express/widgets/custom_loader.dart';
-import 'package:eight_express/screens/home_screen.dart'; // Ensure this is imported
+import 'package:eight_express/screens/home_screen.dart'; 
 
 class AuthScreen extends StatefulWidget {
   const AuthScreen({super.key});
@@ -18,11 +18,15 @@ class AuthScreen extends StatefulWidget {
 
 class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
   late AnimationController _bgAnimController;
+  
+  // --- FIX: Flag to prevent event conflict ---
+  // When a user registers, both UserCreated AND SignedIn fire.
+  // We use this flag to ignore the second event if the first one happened.
+  bool _justRegistered = false; 
 
   @override
   void initState() {
     super.initState();
-    // Floating icons animation controller - Preserved
     _bgAnimController = AnimationController(
       vsync: this,
       duration: const Duration(seconds: 25),
@@ -35,18 +39,25 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
     super.dispose();
   }
 
-  // --- TRANSITION TRIGGER ---
-  // Tells the Provider to show the blurred loading overlay
-  // and navigates to Home with the correct 'isNewUser' flag
+  // --- FIXED TRANSITION LOGIC ---
   Future<void> _triggerTransition(bool isNew) async {
+    if (!mounted) return;
+    
     final userProv = Provider.of<UserProvider>(context, listen: false);
     
-    // Start the professional blurred loader
+    // 1. Start the blurred loading overlay
     userProv.startLoginTransition();
 
-    // Small delay to let the transition animation feel smooth
-    await Future.delayed(const Duration(milliseconds: 1500));
+    // 2. WAIT for Profile to actually load from Firestore
+    // This loop checks every 200ms if the provider has finished loading the user.
+    // We try for up to 4 seconds (20 retries).
+    int retries = 0;
+    while (!userProv.isProfileLoaded && retries < 20) {
+      await Future.delayed(const Duration(milliseconds: 200));
+      retries++;
+    }
 
+    // 3. Navigate only after data is ready
     if (mounted) {
       Navigator.pushReplacement(
         context, 
@@ -229,18 +240,33 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
                 );
               },
               actions: [
-                // ACTION: EXISTING USER SIGN IN
-                AuthStateChangeAction<SignedIn>((context, state) async {
-                  await _triggerTransition(false); // Flag as NOT a new user
-                }),
-                // ACTION: NEW USER REGISTRATION
+                // ----------------------------------------------------
+                // 1. ACTION: NEW USER REGISTRATION
+                // ----------------------------------------------------
                 AuthStateChangeAction<UserCreated>((context, state) async {
+                  // FIX: Set flag so 'SignedIn' doesn't override us
+                  _justRegistered = true; 
+
                   final user = state.credential.user;
                   if (user != null) {
                     await userProv.createInitialUserDocument(user);
-                    await _triggerTransition(true); // Flag as a NEW user
+                    
+                    // Pass TRUE to enable onboarding modal
+                    if (mounted) await _triggerTransition(true); 
                   }
                 }),
+
+                // ----------------------------------------------------
+                // 2. ACTION: EXISTING USER SIGN IN
+                // ----------------------------------------------------
+                AuthStateChangeAction<SignedIn>((context, state) async {
+                  // FIX: If we just registered, DO NOT run this logic.
+                  if (_justRegistered) return;
+
+                  // Pass FALSE (Normal login, no modal)
+                  if (mounted) await _triggerTransition(false);
+                }),
+
                 ForgotPasswordAction((context, email) {
                   Navigator.push(
                     context, 
