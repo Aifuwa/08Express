@@ -247,7 +247,7 @@ class _OrderCard extends StatelessWidget {
                                       ),
                                       child: const Text(
                                         "CANCELLED",
-                                        style: TextStyle(color: Colors.red, fontWeight: FontWeight.black, fontSize: 10),
+                                        style: TextStyle(color: Colors.red, fontWeight: FontWeight.w900, fontSize: 10),
                                       ),
                                     ),
                                   ),
