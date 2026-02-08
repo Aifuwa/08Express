@@ -29,43 +29,24 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   ];
 
   @override
-  Widget build(BuildContext context) {
-    // Access the provider to handle intro completion
-    final userProv = Provider.of<UserProvider>(context, listen: false);
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
 
+  @override
+  Widget build(BuildContext context) {
     return Scaffold(
+      // Preserved your Background Color Animation
       body: AnimatedContainer(
         duration: const Duration(milliseconds: 500),
         color: bgColors[_currentPage],
         child: Stack(
           children: [
+            // 1. BACKGROUND BLOBS (Preserved your animations)
             _buildBackgroundBlobs(),
 
-            SafeArea(
-              child: Container(
-                alignment: Alignment.topRight,
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-                child: isLastPage
-                    ? const SizedBox()
-                    : TextButton(
-                        onPressed: () => userProv.completeIntro(),
-                        style: TextButton.styleFrom(
-                          backgroundColor: Colors.white.withOpacity(0.5),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                        ),
-                        child: Text(
-                          "SKIP",
-                          style: TextStyle(
-                            color: accentColors[_currentPage],
-                            fontWeight: FontWeight.w900,
-                            letterSpacing: 1.2,
-                            fontSize: 13,
-                          ),
-                        ),
-                      ),
-              ),
-            ),
-
+            // 2. MAIN CONTENT (Moved BEHIND the Skip button)
             PageView(
               controller: _controller,
               onPageChanged: (index) {
@@ -76,19 +57,19 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               },
               children: [
                 _buildPage(
-                  lottiePath: 'lib/lottie/1.json',
+                  lottiePath: 'lib/lottie/1.json', // Restored your original path
                   title: "Premium\nShopping",
                   subtitle: "Experience the luxury of high-quality groceries selected specifically for your home.",
                   accentColor: accentColors[0],
                 ),
                 _buildPage(
-                  lottiePath: 'lib/lottie/2.json',
+                  lottiePath: 'lib/lottie/2.json', // Restored your original path
                   title: "Lightning\nExpress",
                   subtitle: "Our express delivery system ensures your items arrives in good condition.",
                   accentColor: accentColors[1],
                 ),
                 _buildPage(
-                  lottiePath: 'lib/lottie/3.json',
+                  lottiePath: 'lib/lottie/3.json', // Restored your original path
                   title: "Secure\nCheckout",
                   subtitle: "Transparent bank transfers with instant receipt verification for your peace of mind.",
                   accentColor: accentColors[2],
@@ -96,6 +77,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               ],
             ),
 
+            // 3. BOTTOM INDICATORS & BUTTONS
             Positioned(
               bottom: 50,
               left: 30,
@@ -123,6 +105,37 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                         : _buildNextButton(accentColors[_currentPage]),
                   ),
                 ],
+              ),
+            ),
+
+            // 4. SKIP BUTTON (MOVED HERE TO FIX CLICK ISSUE)
+            // It is now the last item in the Stack, meaning it draws ON TOP of the PageView
+            Positioned(
+              top: 0,
+              right: 0,
+              child: SafeArea(
+                child: Container(
+                  alignment: Alignment.topRight,
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                  child: isLastPage
+                      ? const SizedBox()
+                      : TextButton(
+                          onPressed: () => Provider.of<UserProvider>(context, listen: false).completeIntro(),
+                          style: TextButton.styleFrom(
+                            backgroundColor: Colors.white.withOpacity(0.5),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                          ),
+                          child: Text(
+                            "SKIP",
+                            style: TextStyle(
+                              color: accentColors[_currentPage],
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 1.2,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ),
+                ),
               ),
             ),
           ],

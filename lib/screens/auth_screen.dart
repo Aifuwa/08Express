@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui';
 import 'package:flutter/material.dart';
@@ -19,9 +20,7 @@ class AuthScreen extends StatefulWidget {
 class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
   late AnimationController _bgAnimController;
   
-  // --- FIX: Flag to prevent event conflict ---
-  // When a user registers, both UserCreated AND SignedIn fire.
-  // We use this flag to ignore the second event if the first one happened.
+  // Flag to prevent event conflict between UserCreated and SignedIn
   bool _justRegistered = false; 
 
   @override
@@ -39,7 +38,7 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
     super.dispose();
   }
 
-  // --- FIXED TRANSITION LOGIC ---
+  // --- TRANSITION LOGIC ---
   Future<void> _triggerTransition(bool isNew) async {
     if (!mounted) return;
     
@@ -49,8 +48,6 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
     userProv.startLoginTransition();
 
     // 2. WAIT for Profile to actually load from Firestore
-    // This loop checks every 200ms if the provider has finished loading the user.
-    // We try for up to 4 seconds (20 retries).
     int retries = 0;
     while (!userProv.isProfileLoaded && retries < 20) {
       await Future.delayed(const Duration(milliseconds: 200));
@@ -167,7 +164,10 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
               ),
             ),
             child: SignInScreen(
-              providers: [EmailAuthProvider(), PhoneAuthProvider()],
+              providers: [
+                EmailAuthProvider(), 
+                PhoneAuthProvider(),
+              ],
               headerMaxExtent: isKeyboardOpen ? 120 : 230,
               headerBuilder: (context, constraints, shrinkOffset) {
                 return Container(
@@ -240,33 +240,23 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
                 );
               },
               actions: [
-                // ----------------------------------------------------
-                // 1. ACTION: NEW USER REGISTRATION
-                // ----------------------------------------------------
+                // 1. New User Registration
                 AuthStateChangeAction<UserCreated>((context, state) async {
-                  // FIX: Set flag so 'SignedIn' doesn't override us
                   _justRegistered = true; 
-
                   final user = state.credential.user;
                   if (user != null) {
                     await userProv.createInitialUserDocument(user);
-                    
-                    // Pass TRUE to enable onboarding modal
                     if (mounted) await _triggerTransition(true); 
                   }
                 }),
 
-                // ----------------------------------------------------
-                // 2. ACTION: EXISTING USER SIGN IN
-                // ----------------------------------------------------
+                // 2. Existing User Sign In
                 AuthStateChangeAction<SignedIn>((context, state) async {
-                  // FIX: If we just registered, DO NOT run this logic.
                   if (_justRegistered) return;
-
-                  // Pass FALSE (Normal login, no modal)
                   if (mounted) await _triggerTransition(false);
                 }),
 
+                // 3. Forgot Password Navigation
                 ForgotPasswordAction((context, email) {
                   Navigator.push(
                     context, 
@@ -274,9 +264,39 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
                       builder: (context) => ForgotPasswordScreen(
                         email: email,
                         headerMaxExtent: 200,
+                        headerBuilder: (context, constraints, shrinkOffset) {
+                          return Container(
+                            color: darkBlue,
+                            child: const Center(
+                              child: Icon(Icons.lock_reset, size: 80, color: Colors.white),
+                            ),
+                          );
+                        },
                       ),
                     ),
                   );
+                }),
+
+                // 4. Phone Auth: Handle SMS Sent (FAIL-SAFE FIX)
+                // We use the generic state listener and cast to dynamic 
+                // to force the compiler to accept 'flowKey'.
+                AuthStateChangeAction((context, state) {
+                  if (state is SMSCodeSent) {
+                    final dynamic dynamicState = state;
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => SMSCodeInputScreen(
+                          flowKey: dynamicState.flowKey, 
+                          actions: [
+                            AuthStateChangeAction<SignedIn>((context, state) {
+                              _triggerTransition(false);
+                            }),
+                          ],
+                        ),
+                      ),
+                    );
+                  }
                 }),
               ],
             ),

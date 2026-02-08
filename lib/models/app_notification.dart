@@ -6,8 +6,8 @@ class AppNotification {
   final String body;
   final DateTime timestamp;
   final bool isRead;
-  final String? type; // 'order', 'promo', 'system'
-  final String? orderId; // Added to link notification to a specific order
+  final String? type; 
+  final String? orderId;
 
   AppNotification({
     required this.id,
@@ -22,13 +22,15 @@ class AppNotification {
   factory AppNotification.fromFirestore(DocumentSnapshot doc) {
     Map<String, dynamic> data = doc.data() as Map<String, dynamic>? ?? {};
     
-    // Safety check for Timestamp: Firestore serverTimestamp() can be null for a 
-    // split second before it reaches the server.
+    // Safety check for Timestamp
     DateTime ts;
     if (data['timestamp'] is Timestamp) {
       ts = (data['timestamp'] as Timestamp).toDate();
+    } else if (data['sentAt'] is Timestamp) {
+      // Fallback to sentAt if timestamp is missing (both seen in screenshot)
+      ts = (data['sentAt'] as Timestamp).toDate();
     } else {
-      ts = DateTime.now(); // Fallback to current time
+      ts = DateTime.now(); 
     }
 
     return AppNotification(
@@ -36,13 +38,14 @@ class AppNotification {
       title: data['title'] ?? 'Notification',
       body: data['body'] ?? '',
       timestamp: ts,
+      // Map 'isRead' (default to false because it's usually missing in admin broadcasts)
       isRead: data['isRead'] ?? false,
-      type: data['type'],
+      // Mapping 'screen' from your screenshot to 'type'
+      type: data['screen'] ?? data['type'] ?? 'system',
       orderId: data['orderId'],
     );
   }
 
-  /// Converts the model into a Map for Firestore uploads
   Map<String, dynamic> toMap() {
     return {
       'title': title,

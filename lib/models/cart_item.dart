@@ -45,23 +45,27 @@ class CartItem {
     );
   }
 
-  /// Convert a Firestore document snapshot to a CartItem.
-  /// Useful if you are persisting the cart items in a 'carts' collection in Firestore.
-  factory CartItem.fromFirestore(DocumentSnapshot doc) {
-    Map<String, dynamic> data = doc.data() as Map<String, dynamic>? ?? {};
+  /// Convert a standard Map to a CartItem.
+  /// This is used by the Provider when fetching items from the Firestore collection.
+  factory CartItem.fromMap(Map<String, dynamic> map) {
     return CartItem(
-      productId: doc.id,
-      name: data['name'] ?? 'Unknown Product',
-      price: (data['price'] as num?)?.toDouble() ?? 0.0,
-      imageUrl: data['imageUrl'] ?? '',
-      maxStock: (data['maxStock'] ?? 0).toInt(), 
-      quantity: (data['quantity'] ?? 1).toInt(),
+      productId: map['productId'] ?? '',
+      name: map['name'] ?? 'Unknown Product',
+      price: (map['price'] as num?)?.toDouble() ?? 0.0,
+      imageUrl: map['imageUrl'] ?? '',
+      maxStock: (map['maxStock'] ?? 0).toInt(), 
+      quantity: (map['quantity'] ?? 1).toInt(),
     );
   }
 
+  /// Convert a Firestore document snapshot to a CartItem.
+  factory CartItem.fromFirestore(DocumentSnapshot doc) {
+    Map<String, dynamic> data = doc.data() as Map<String, dynamic>? ?? {};
+    // We merge the document ID into the map to ensure productId is never empty
+    return CartItem.fromMap({...data, 'productId': doc.id});
+  }
+
   /// Convert CartItem to a Map for Firestore.
-  /// We save the 'maxStock' limit snapshot so the app doesn't have to 
-  /// check the main product document every time the user clicks "+".
   Map<String, dynamic> toMap() {
     return {
       'productId': productId,

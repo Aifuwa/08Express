@@ -1,10 +1,54 @@
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart'; // Added
 import 'package:eight_express/models/cart_item.dart';
 import 'package:eight_express/models/product.dart';
 
 class CartProvider with ChangeNotifier {
   // Internal map of items where key is Product ID
   Map<String, CartItem> _items = {};
+  
+  // --- FIREBASE PROPERTIES ---
+  final FirebaseFirestore _db = FirebaseFirestore.instance;
+  String? _userId;
+
+  // --- INITIALIZATION ---
+
+  /// Sets the current user ID and fetches their cart from Firestore.
+  /// Call this when the user logs in.
+  void setUserId(String? uid) {
+    _userId = uid;
+    if (_userId != null) {
+      _fetchCartFromFirestore();
+    } else {
+      _items = {};
+      notifyListeners();
+    }
+  }
+
+  /// Helper to get the Firestore collection reference for the user's cart
+  CollectionReference<Map<String, dynamic>>? get _cartRef {
+    if (_userId == null) return null;
+    return _db.collection('users').doc(_userId).collection('cart');
+  }
+
+  /// Loads cart data from Firestore on app startup/login
+  Future<void> _fetchCartFromFirestore() async {
+    if (_cartRef == null) return;
+    try {
+      final snapshot = await _cartRef!.get();
+      final Map<String, CartItem> loadedItems = {};
+      
+      for (var doc in snapshot.docs) {
+        // This assumes your CartItem model has a fromMap/fromFirestore method
+        loadedItems[doc.id] = CartItem.fromMap(doc.data());
+      }
+      
+      _items = loadedItems;
+      notifyListeners();
+    } catch (e) {
+      debugPrint("Error fetching cart: $e");
+    }
+  }
 
   // --- GETTERS ---
 
@@ -31,184 +75,181 @@ class CartProvider with ChangeNotifier {
     return total;
   }
 
+  // --- REAL-TIME SYNC LOGIC ---
+
+  void syncProductData(String productId, double newPrice, int newMaxStock) {
+    if (!_items.containsKey(productId)) return;
+
+    final existing = _items[productId]!;
+    bool needsUpdate = false;
+
+    if (existing.price != newPrice) needsUpdate = true;
+    if (existing.maxStock != newMaxStock) needsUpdate = true;
+
+    if (needsUpdate) {
+      int finalQty = existing.quantity;
+      if (finalQty > newMaxStock) finalQty = newMaxStock;
+
+      final updatedItem = CartItem(
+        productId: existing.productId,
+        name: existing.name,
+        imageUrl: existing.imageUrl,
+        price: newPrice,
+        maxStock: newMaxStock,
+        quantity: finalQty,
+      );
+
+      _items[productId] = updatedItem;
+      notifyListeners();
+      
+      // Sync update to Firestore
+      _cartRef?.doc(productId).set(updatedItem.toMap());
+    }
+  }
+
   // --- HELPER LOGIC ---
 
-  /// Calculates the maximum allowed quantity for a product.
-  /// It picks the smaller value between Warehouse Stock and the Customer Purchase Limit.
   int _calculateEffectiveLimit(Product product) {
     int warehouseStock = product.stock;
     int purchaseLimit = product.maxPurchaseLimit;
 
-    // If purchaseLimit is 0 or greater than stock, the only limit is warehouse stock.
     if (purchaseLimit <= 0 || purchaseLimit >= warehouseStock) {
       return warehouseStock;
     }
-    
-    // Otherwise, the customer is restricted by the specific purchase limit.
     return purchaseLimit;
   }
 
   // --- LOGIC METHODS ---
 
-  /// Adds an item to the cart with strict stock and purchase limit validation.
-  /// Returns [true] if added successfully, [false] if any limit is reached.
   bool addItem(Product product, {int quantity = 1}) {
-    // 1. Calculate the tighter limit (Stock vs Customer Limit)
     int effectiveLimit = _calculateEffectiveLimit(product);
+    if (effectiveLimit <= 0) return false; 
 
-    // 2. Basic validation: Is the product available at all?
-    if (effectiveLimit <= 0) {
-      return false; 
-    }
+    CartItem itemToSave;
 
     if (_items.containsKey(product.id)) {
-      // 3. Item already exists in the bag
       final existingCartItem = _items[product.id]!;
       int currentQty = existingCartItem.quantity;
-      
-      // Safety Check: Are we already at the maximum allowed limit?
-      if (currentQty >= effectiveLimit) {
-        return false; 
-      }
+      if (currentQty >= effectiveLimit) return false; 
 
-      // Calculate new quantity but cap it at the effective limit
       int newTotal = currentQty + quantity;
-      if (newTotal > effectiveLimit) {
-        newTotal = effectiveLimit;
-      }
+      if (newTotal > effectiveLimit) newTotal = effectiveLimit;
 
-      _items.update(
-        product.id,
-        (existing) => CartItem(
-          productId: existing.productId,
-          name: existing.name,
-          price: existing.price,
-          imageUrl: existing.imageUrl,
-          // We store the 'effectiveLimit' as maxStock so the Cart Screen knows the boundary
-          maxStock: effectiveLimit, 
-          quantity: newTotal,
-        ),
+      itemToSave = CartItem(
+        productId: existingCartItem.productId,
+        name: existingCartItem.name,
+        price: product.price,
+        imageUrl: existingCartItem.imageUrl,
+        maxStock: effectiveLimit, 
+        quantity: newTotal,
       );
     } else {
-      // 4. Adding a new product to the bag for the first time
       int initialQuantity = quantity;
-      
-      // Ensure we don't start with more than allowed
-      if (initialQuantity > effectiveLimit) {
-        initialQuantity = effectiveLimit;
-      }
+      if (initialQuantity > effectiveLimit) initialQuantity = effectiveLimit;
 
-      _items.putIfAbsent(
-        product.id,
-        () => CartItem(
-          productId: product.id,
-          name: product.name,
-          price: product.price,
-          imageUrl: product.imageUrl,
-          maxStock: effectiveLimit,
-          quantity: initialQuantity,
-        ),
+      itemToSave = CartItem(
+        productId: product.id,
+        name: product.name,
+        price: product.price,
+        imageUrl: product.imageUrl,
+        maxStock: effectiveLimit,
+        quantity: initialQuantity,
       );
     }
     
+    _items[product.id] = itemToSave;
     notifyListeners();
+    
+    // Background sync to Firebase
+    _cartRef?.doc(product.id).set(itemToSave.toMap());
     return true;
   }
 
-  /// Decrements quantity by 1. If quantity becomes 0, removes item from cart.
   void removeSingleItem(String productId) {
-    if (!_items.containsKey(productId)) {
-      return;
-    }
+    if (!_items.containsKey(productId)) return;
     
     if (_items[productId]!.quantity > 1) {
-      _items.update(
-        productId,
-        (existing) => CartItem(
-          productId: existing.productId,
-          name: existing.name,
-          price: existing.price,
-          imageUrl: existing.imageUrl,
-          maxStock: existing.maxStock, 
-          quantity: existing.quantity - 1,
-        ),
+      final updated = CartItem(
+        productId: _items[productId]!.productId,
+        name: _items[productId]!.name,
+        price: _items[productId]!.price,
+        imageUrl: _items[productId]!.imageUrl,
+        maxStock: _items[productId]!.maxStock, 
+        quantity: _items[productId]!.quantity - 1,
       );
+      _items[productId] = updated;
+      _cartRef?.doc(productId).set(updated.toMap());
     } else {
       _items.remove(productId);
+      _cartRef?.doc(productId).delete();
     }
     notifyListeners();
   }
 
-  /// Increments quantity by 1 with validation against Effective Limit.
-  /// Used primarily by the "+" button on the Cart Screen.
   bool incrementItem(String productId) {
     if (!_items.containsKey(productId)) return false;
-
     final existing = _items[productId]!;
 
-    // Validate against the stored Effective Limit (maxStock)
-    if (existing.quantity >= existing.maxStock) {
-      return false; // User hit either warehouse stock limit or customer purchase limit
-    }
+    if (existing.quantity >= existing.maxStock) return false;
 
-    _items.update(
-      productId,
-      (existing) => CartItem(
-        productId: existing.productId,
-        name: existing.name,
-        price: existing.price,
-        imageUrl: existing.imageUrl,
-        maxStock: existing.maxStock,
-        quantity: existing.quantity + 1,
-      ),
+    final updated = CartItem(
+      productId: existing.productId,
+      name: existing.name,
+      price: existing.price,
+      imageUrl: existing.imageUrl,
+      maxStock: existing.maxStock,
+      quantity: existing.quantity + 1,
     );
+    
+    _items[productId] = updated;
     notifyListeners();
+    
+    _cartRef?.doc(productId).set(updated.toMap());
     return true;
   }
 
-  /// Removes a product entirely from the bag regardless of quantity.
   void removeItem(String productId) {
     _items.remove(productId);
     notifyListeners();
+    _cartRef?.doc(productId).delete();
   }
 
-  /// Manually sets the quantity (used for the Direct Input/Dialog feature).
-  /// Validates input against the calculated Effective Limit.
   void setQuantity(String productId, int quantity) {
     if (!_items.containsKey(productId)) return;
 
-    // If user enters 0 or less, remove the item
     if (quantity <= 0) {
       removeItem(productId);
       return;
     }
 
     final existing = _items[productId]!;
-
-    // Validate manual input against stored limit snapshot
     int finalQuantity = quantity;
-    if (finalQuantity > existing.maxStock) {
-      finalQuantity = existing.maxStock;
-    }
+    if (finalQuantity > existing.maxStock) finalQuantity = existing.maxStock;
 
-    _items.update(
-      productId,
-      (existing) => CartItem(
-        productId: existing.productId,
-        name: existing.name,
-        price: existing.price,
-        imageUrl: existing.imageUrl,
-        maxStock: existing.maxStock,
-        quantity: finalQuantity,
-      ),
+    final updated = CartItem(
+      productId: existing.productId,
+      name: existing.name,
+      price: existing.price,
+      imageUrl: existing.imageUrl,
+      maxStock: existing.maxStock,
+      quantity: finalQuantity,
     );
+
+    _items[productId] = updated;
     notifyListeners();
+    
+    _cartRef?.doc(productId).set(updated.toMap());
   }
 
-  /// Resets the cart to empty. 
-  /// Called automatically after a successful Order Placement.
   void clearCart() {
     _items = {};
     notifyListeners();
+    
+    // Clear Firestore collection
+    _cartRef?.get().then((snapshot) {
+      for (DocumentSnapshot doc in snapshot.docs) {
+        doc.reference.delete();
+      }
+    });
   }
 }

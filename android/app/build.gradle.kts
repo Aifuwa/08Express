@@ -34,8 +34,8 @@ android {
 
     defaultConfig {
         applicationId = "com.eightexpress.app"
+        //minSdk = flutter.minSdkVersion 
         minSdk = flutter.minSdkVersion 
-        
         // Explicitly set to 35 to prevent "Unknown calling package" error during Auth logic
         targetSdk = 35 
         

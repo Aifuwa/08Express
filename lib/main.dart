@@ -17,14 +17,13 @@ import 'package:eight_express/services/order_service.dart';
 
 import 'package:eight_express/screens/auth_screen.dart';
 import 'package:eight_express/screens/home_screen.dart';
-import 'package:eight_express/screens/splash_screen.dart'; 
 import 'package:eight_express/widgets/auth_wrapper.dart';
-import 'package:eight_express/services/remote_config_service.dart';
 import 'package:eight_express/screens/maintenance_screen.dart';
 import 'package:firebase_remote_config/firebase_remote_config.dart';
 import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:eight_express/services/notification_service.dart';
 
+// Global navigation key
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
 
@@ -53,42 +52,46 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
-  // 1. Initialize Remote Config
+  // --- 1. CONFIGURE AUTH PROVIDERS ---
+  auth_ui.FirebaseUIAuth.configureProviders([
+    auth_ui.EmailAuthProvider(),
+    auth_ui.PhoneAuthProvider(),
+  ]);
+
+  // --- 2. REMOTE CONFIG ---
   final remoteConfig = FirebaseRemoteConfig.instance;
-  
-  // 2. Set settings with 10-second timeout to handle slow networks
   await remoteConfig.setConfigSettings(RemoteConfigSettings(
     fetchTimeout: const Duration(seconds: 10),
     minimumFetchInterval: const Duration(seconds: 0),
   ));
 
-  // 3. Fetch and activate the data from the cloud
   try {
     await remoteConfig.fetchAndActivate();
   } catch (e) {
-    debugPrint("Remote Config Fetch Failed (Using Defaults): $e");
+    debugPrint("Remote Config Fetch Failed: $e");
   }
 
-  // 4. Check for Maintenance Mode before starting
+  // Maintenance Check
   if (remoteConfig.getBool('is_under_maintenance')) {
     runApp(const MaterialApp(home: MaintenanceScreen(), debugShowCheckedModeBanner: false));
     return;
   }
 
-  // 5. Initialize Crashlytics
+  // --- 3. CRASHLYTICS ---
   FlutterError.onError = FirebaseCrashlytics.instance.recordFlutterFatalError;
 
-  // --- DOCUMENTATION IMPLEMENTATION: CONFIGURE AUTH PROVIDERS ---
-  // This registers the handlers required for Email Resets and Phone SMS to function
-  auth_ui.FirebaseUIAuth.configureProviders([
-    auth_ui.EmailAuthProvider(),
-    auth_ui.PhoneAuthProvider(),
-  ]);
-  
+  // --- 4. MESSAGING ---
   FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
 
-  await flutterLocalNotificationsPlugin.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()?.createNotificationChannel(channel);
-  await FirebaseMessaging.instance.setForegroundNotificationPresentationOptions(alert: true, badge: true, sound: true);
+  await flutterLocalNotificationsPlugin
+      .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+      ?.createNotificationChannel(channel);
+
+  await FirebaseMessaging.instance.setForegroundNotificationPresentationOptions(
+    alert: true, 
+    badge: true, 
+    sound: true,
+  );
 
   runApp(const MyApp());
 }
@@ -109,11 +112,12 @@ class _MyAppState extends State<MyApp> {
   Future<void> _initFCM() async {
     FirebaseMessaging messaging = FirebaseMessaging.instance;
     await messaging.requestPermission(alert: true, badge: true, sound: true);
-
-    // --- SUBSCRIBE TO TOPIC FOR BROADCAST NOTIFICATIONS ---
     await messaging.subscribeToTopic('all_users');
 
-    // --- OBSERVE AUTH CHANGES TO SAVE TOKEN UPON LOGIN ---
+    if (FirebaseAuth.instance.currentUser != null) {
+      _saveDeviceToken();
+    }
+
     FirebaseAuth.instance.authStateChanges().listen((User? user) {
       if (user != null) {
         _saveDeviceToken();
@@ -131,7 +135,6 @@ class _MyAppState extends State<MyApp> {
     FirebaseMessaging.onMessage.listen((RemoteMessage message) async {
       RemoteNotification? notification = message.notification;
       if (notification != null) {
-        // --- SAVE TO FIRESTORE UPON RECEIVING MESSAGE ---
         await NotificationService().saveNotification(
           title: notification.title ?? "New Notification",
           body: notification.body ?? "",
@@ -157,12 +160,8 @@ class _MyAppState extends State<MyApp> {
     });
 
     FirebaseMessaging.onMessageOpenedApp.listen((msg) => _handleNav(msg.data['screen']));
-    
-    // Debug token for manual testing
-    debugPrint("FCM TOKEN: ${await messaging.getToken()}");
   }
 
-  // --- SAVE TOKEN TO FIRESTORE LINKED TO CURRENT USER ---
   Future<void> _saveDeviceToken() async {
     User? currentUser = FirebaseAuth.instance.currentUser;
     if (currentUser != null) {
@@ -178,12 +177,12 @@ class _MyAppState extends State<MyApp> {
 
   void _handleNav(String? screen) {
     if (screen == null || navigatorKey.currentState == null) return;
-    Future.delayed(Duration.zero, () {
-      String route = '/home';
-      if (screen == 'my_orders') route = '/my_orders';
-      if (screen == 'categories') route = '/categories';
-      navigatorKey.currentState?.pushNamed(route);
-    });
+    
+    String route = '/home';
+    if (screen == 'my_orders') route = '/my_orders';
+    if (screen == 'categories') route = '/categories';
+    
+    navigatorKey.currentState?.pushNamed(route);
   }
 
   @override
@@ -192,11 +191,24 @@ class _MyAppState extends State<MyApp> {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => UserProvider()),
-        ChangeNotifierProvider(create: (_) => CartProvider()),
+        
+        // --- UPDATED: CartProvider now listens to UserProvider ---
+        ChangeNotifierProxyProvider<UserProvider, CartProvider>(
+          create: (_) => CartProvider(),
+          update: (_, userProv, cartProv) {
+            // When user changes (logs in/out), update the CartProvider's UID
+            return cartProv!..setUserId(userProv.appUser?.uid);
+          },
+        ),
+
         ChangeNotifierProvider(create: (_) => CategoryProvider()),
         ChangeNotifierProvider(create: (_) => ProductProvider()),
+        
         ChangeNotifierProxyProvider2<UserProvider, CartProvider, OrderService>(
-          create: (context) => OrderService(Provider.of<UserProvider>(context, listen: false), Provider.of<CartProvider>(context, listen: false)),
+          create: (context) => OrderService(
+            Provider.of<UserProvider>(context, listen: false), 
+            Provider.of<CartProvider>(context, listen: false),
+          ),
           update: (context, user, cart, prev) => OrderService(user, cart),
         ),
       ],
@@ -208,12 +220,24 @@ class _MyAppState extends State<MyApp> {
           useMaterial3: true,
           colorScheme: ColorScheme.fromSeed(seedColor: orange, primary: orange),
           inputDecorationTheme: InputDecorationTheme(
-            filled: true, fillColor: Colors.white,
-            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(15), borderSide: BorderSide(color: Colors.grey.shade300)),
-            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(15), borderSide: const BorderSide(color: orange, width: 2)),
+            filled: true, 
+            fillColor: Colors.white,
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(15), 
+              borderSide: BorderSide(color: Colors.grey.shade300),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(15), 
+              borderSide: const BorderSide(color: orange, width: 2),
+            ),
           ),
         ),
         home: const AuthWrapper(),
+        routes: {
+          '/home': (context) => const HomeScreen(),
+          // '/categories': (context) => const CategoriesScreen(),
+          // '/my_orders': (context) => const MyOrdersScreen(),
+        },
       ),
     );
   }

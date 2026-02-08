@@ -48,7 +48,7 @@ class MyOrdersScreen extends StatelessWidget {
                 pinned: true,
                 elevation: 0,
                 centerTitle: true,
-                backgroundColor: Colors.white.withOpacity(0.1),
+                backgroundColor: scaffoldBg.withOpacity(0.9), // Matches bg for clean scroll
                 leading: IconButton(
                   icon: const Icon(Icons.arrow_back_ios_new, color: Colors.black87, size: 20),
                   onPressed: () => Navigator.pop(context),
@@ -92,7 +92,10 @@ class MyOrdersScreen extends StatelessWidget {
                       return SliverFillRemaining(child: _buildEmptyState(context, primaryColor));
                     }
 
+                    // Sort orders: Newest first
                     final orders = snapshot.data!;
+                    // Optional: orders.sort((a, b) => b.orderDate.compareTo(a.orderDate));
+
                     return SliverPadding(
                       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
                       sliver: SliverList(
@@ -120,7 +123,7 @@ class MyOrdersScreen extends StatelessWidget {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.shopping_bag_outlined, size: 100, color: color.withOpacity(0.2)),
+          Icon(Icons.receipt_long_rounded, size: 100, color: color.withOpacity(0.2)),
           const SizedBox(height: 20),
           const Text(
             "No orders yet", 
@@ -151,214 +154,259 @@ class MyOrdersScreen extends StatelessWidget {
 class _OrderCard extends StatelessWidget {
   final AppOrder order;
   final Color primaryColor;
-  
+
   const _OrderCard({required this.order, required this.primaryColor});
 
   @override
   Widget build(BuildContext context) {
     final List<dynamic> milestones = order.trackingMilestones;
     final int currentStep = order.currentStep;
-    
-    final String currentStatusLabel = (currentStep < milestones.length) 
-        ? milestones[currentStep].toString().toUpperCase() 
-        : milestones.last.toString().toUpperCase();
 
-    // Logic for Error/Cancellation coloring
-    final bool isFailed = currentStatusLabel.contains("CANCELLED") || currentStatusLabel.contains("FAILED");
-    final Color activeTrackingColor = isFailed ? Colors.red : primaryColor;
+    String currentStatusLabel = "Processing";
+    if (milestones.isNotEmpty) {
+      currentStatusLabel = (currentStep < milestones.length)
+          ? milestones[currentStep].toString().toUpperCase()
+          : milestones.last.toString().toUpperCase();
+    }
 
+    // Comprehensive check for cancelled/failed states
+    final bool isCancelled = currentStatusLabel.contains("CANCELLED") ||
+        currentStatusLabel.contains("FAILED") ||
+        currentStatusLabel.contains("DECLINED") ||
+        currentStatusLabel.contains("REJECTED");
+
+    final Color activeTrackingColor = isCancelled ? Colors.red.shade700 : primaryColor;
+    final Color statusColor = _getStatusColor(currentStatusLabel);
     final String? previewImage = order.items.isNotEmpty ? order.items.first.imageUrl : null;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 20),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isCancelled ? Colors.grey.shade50 : Colors.white, // Subtle bg change
         borderRadius: BorderRadius.circular(24),
         boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 20, offset: const Offset(0, 10))
+          BoxShadow(
+            color: isCancelled ? Colors.transparent : Colors.black.withOpacity(0.04),
+            blurRadius: 20,
+            offset: const Offset(0, 10),
+          )
         ],
+        border: isCancelled ? Border.all(color: Colors.red.withOpacity(0.2), width: 1) : null,
       ),
       child: Material(
         color: Colors.transparent,
         child: InkWell(
           borderRadius: BorderRadius.circular(24),
           onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => OrderDetailScreen(order: order))),
-          child: Column(
-            children: [
-              Padding(
-                padding: const EdgeInsets.all(18.0),
-                child: Row(
-                  children: [
-                    Stack(
-                      clipBehavior: Clip.none,
-                      children: [
-                        Container(
-                          width: 80, height: 80,
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(18),
-                            color: Colors.grey[50],
-                            image: previewImage != null 
-                              ? DecorationImage(image: NetworkImage(previewImage), fit: BoxFit.cover) 
-                              : null,
-                          ),
-                          child: previewImage == null 
-                            ? const Icon(Icons.inventory_2_outlined, color: Colors.grey) 
-                            : null,
-                        ),
-                        if (order.items.length > 1)
-                          Positioned(
-                            bottom: -5, right: -5,
-                            child: Container(
-                              padding: const EdgeInsets.all(6),
-                              decoration: BoxDecoration(
-                                color: activeTrackingColor, 
-                                shape: BoxShape.circle, 
-                                border: Border.all(color: Colors.white, width: 2.5)
-                              ),
-                              child: Text(
-                                "+${order.items.length - 1}", 
-                                style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+          child: Opacity(
+            opacity: isCancelled ? 0.85 : 1.0, // Slight fade for cancelled items
+            child: Column(
+              children: [
+                // 1. TOP SECTION
+                Padding(
+                  padding: const EdgeInsets.all(18.0),
+                  child: Row(
+                    children: [
+                      // Product Image with "CANCELLED" Overlay
+                      Stack(
+                        clipBehavior: Clip.none,
                         children: [
-                          Text(
-                            "Order #${order.id.length > 8 ? order.id.substring(0, 8).toUpperCase() : order.id.toUpperCase()}", 
-                            style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16, letterSpacing: -0.5)
+                          ColorFiltered(
+                            colorFilter: isCancelled
+                                ? const ColorFilter.mode(Colors.grey, BlendMode.saturation)
+                                : const ColorFilter.mode(Colors.transparent, BlendMode.multiply),
+                            child: Container(
+                              width: 80, height: 80,
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(18),
+                                color: Colors.grey[100],
+                                image: previewImage != null
+                                    ? DecorationImage(image: NetworkImage(previewImage), fit: BoxFit.cover)
+                                    : null,
+                              ),
+                              child: previewImage == null ? const Icon(Icons.inventory_2_outlined, color: Colors.grey) : null,
+                            ),
                           ),
-                          const SizedBox(height: 4),
-                          Text(
-                            DateFormat('MMM dd, yyyy • hh:mm a').format(order.orderDate.toDate()), 
-                            style: TextStyle(color: Colors.grey.shade500, fontSize: 12)
-                          ),
-                          const SizedBox(height: 12),
                           
-                          // Dynamic Status Badge (Turns Red if Cancelled)
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                            decoration: BoxDecoration(
-                              color: _getStatusColor(currentStatusLabel).withOpacity(0.1), 
-                              borderRadius: BorderRadius.circular(12)
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min, 
-                              children: [
-                                Icon(
-                                  isFailed ? Icons.cancel : Icons.lens, 
-                                  size: isFailed ? 12 : 8, 
-                                  color: _getStatusColor(currentStatusLabel)
+                          // THE "CANCELLED" STAMP OVER IMAGE
+                          if (isCancelled)
+                            Positioned.fill(
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  color: Colors.black.withOpacity(0.3),
+                                  borderRadius: BorderRadius.circular(18),
                                 ),
-                                const SizedBox(width: 8),
-                                Text(
-                                  currentStatusLabel, 
-                                  style: TextStyle(
-                                    color: _getStatusColor(currentStatusLabel), 
-                                    fontSize: 10, 
-                                    fontWeight: FontWeight.w900,
-                                    letterSpacing: 0.5,
-                                  )
+                                child: Center(
+                                  child: Transform.rotate(
+                                    angle: -0.5,
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        border: Border.all(color: Colors.red, width: 2),
+                                        borderRadius: BorderRadius.circular(4),
+                                      ),
+                                      child: const Text(
+                                        "CANCELLED",
+                                        style: TextStyle(color: Colors.red, fontWeight: FontWeight.black, fontSize: 10),
+                                      ),
+                                    ),
+                                  ),
                                 ),
-                              ],
+                              ),
                             ),
-                          ),
+
+                          if (order.items.length > 1 && !isCancelled)
+                            Positioned(
+                              bottom: -5, right: -5,
+                              child: Container(
+                                padding: const EdgeInsets.all(6),
+                                decoration: BoxDecoration(
+                                    color: activeTrackingColor,
+                                    shape: BoxShape.circle,
+                                    border: Border.all(color: Colors.white, width: 2.5)),
+                                child: Text("+${order.items.length - 1}",
+                                    style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                              ),
+                            ),
                         ],
                       ),
-                    ),
-                  ],
-                ),
-              ),
+                      const SizedBox(width: 16),
 
-              // --- REAL-TIME TRACKING LINE (REACTIVE TO FIRESTORE) ---
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: Column(
-                  children: [
-                    Row(
-                      children: List.generate(milestones.length, (index) {
-                        bool isCompleted = index <= currentStep;
-                        return Expanded(
-                          child: Container(
-                            height: 4,
-                            margin: const EdgeInsets.symmetric(horizontal: 2.5),
-                            decoration: BoxDecoration(
-                              color: isCompleted ? activeTrackingColor : Colors.grey[200],
-                              borderRadius: BorderRadius.circular(2),
+                      // Info Column
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                                "Order #${order.id.length > 8 ? order.id.substring(0, 8).toUpperCase() : order.id.toUpperCase()}",
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w900,
+                                  fontSize: 16,
+                                  letterSpacing: -0.5,
+                                  decoration: isCancelled ? TextDecoration.lineThrough : null, // Strikethrough ID
+                                  color: isCancelled ? Colors.grey : Colors.black87,
+                                )),
+                            const SizedBox(height: 4),
+                            Text(DateFormat('MMM dd, yyyy • hh:mm a').format(order.orderDate.toDate()),
+                                style: TextStyle(color: Colors.grey.shade500, fontSize: 12)),
+                            const SizedBox(height: 12),
+
+                            // Dynamic Status Badge (High Visibility for Cancelled)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                              decoration: BoxDecoration(
+                                  color: isCancelled ? Colors.red : statusColor.withOpacity(0.1),
+                                  borderRadius: BorderRadius.circular(12)),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                      isCancelled ? Icons.error_outline_rounded : Icons.check_circle_rounded,
+                                      size: 14,
+                                      color: isCancelled ? Colors.white : statusColor),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    currentStatusLabel,
+                                    style: TextStyle(
+                                      color: isCancelled ? Colors.white : statusColor,
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w900,
+                                      letterSpacing: 0.5,
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                // 2. TRACKING PROGRESS BAR
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: Column(
+                    children: [
+                      Row(
+                        children: List.generate(milestones.length, (index) {
+                          bool isCompleted = index <= currentStep;
+                          Color barColor = Colors.grey[200]!;
+                          if (isCompleted) {
+                            barColor = isCancelled ? Colors.red.shade200 : primaryColor;
+                          }
+                          return Expanded(
+                            child: Container(
+                              height: 4,
+                              margin: const EdgeInsets.symmetric(horizontal: 2.5),
+                              decoration: BoxDecoration(
+                                color: barColor,
+                                borderRadius: BorderRadius.circular(2),
+                              ),
+                            ),
+                          );
+                        }),
+                      ),
+                      const SizedBox(height: 10),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            isCancelled ? "Order Terminated" : "Tracking Progress",
+                            style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                                color: isCancelled ? Colors.red.shade300 : Colors.grey.shade400),
                           ),
-                        );
-                      }),
-                    ),
-                    const SizedBox(height: 10),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          isFailed ? "Order Terminated" : "Tracking Progress", 
-                          style: TextStyle(
-                            fontSize: 10, 
-                            fontWeight: FontWeight.bold, 
-                            color: isFailed ? Colors.red.withOpacity(0.7) : Colors.grey.shade400
-                          )
-                        ),
-                        Text(
-                          "${((currentStep + 1) / milestones.length * 100).toInt()}%", 
-                          style: TextStyle(
-                            fontSize: 11, 
-                            fontWeight: FontWeight.w900, 
-                            color: activeTrackingColor
-                          )
-                        ),
-                      ],
-                    ),
-                  ],
+                          if (!isCancelled)
+                            Text("${((currentStep + 1) / milestones.length * 100).toInt()}%",
+                                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w900, color: activeTrackingColor))
+                          else
+                            const Text("VOID",
+                                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w900, color: Colors.red)),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
-              ),
 
-              const SizedBox(height: 20),
+                const SizedBox(height: 20),
 
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
-                decoration: BoxDecoration(
-                  color: Colors.grey.shade50.withOpacity(0.7), 
-                  borderRadius: const BorderRadius.vertical(bottom: Radius.circular(24))
+                // 3. BOTTOM FOOTER
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 15),
+                  decoration: BoxDecoration(
+                      color: isCancelled ? Colors.red.withOpacity(0.05) : Colors.grey.shade50.withOpacity(0.7),
+                      borderRadius: const BorderRadius.vertical(bottom: Radius.circular(24))),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text("TOTAL AMOUNT",
+                            style: TextStyle(
+                                color: Colors.grey.shade400,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: 0.5)),
+                        Text('₦${order.totalAmount.toStringAsFixed(0)}',
+                            style: TextStyle(
+                                color: isCancelled ? Colors.grey : activeTrackingColor,
+                                fontWeight: FontWeight.w900,
+                                fontSize: 18,
+                                decoration: isCancelled ? TextDecoration.lineThrough : null)),
+                      ]),
+                      Row(children: [
+                        Text(isCancelled ? "View Refund Status" : "View Details", 
+                            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.black54)),
+                        const SizedBox(width: 5),
+                        const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: Colors.grey)
+                      ]),
+                    ],
+                  ),
                 ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start, 
-                      children: [
-                        Text(
-                          "TOTAL PAID", 
-                          style: TextStyle(color: Colors.grey.shade400, fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 0.5)
-                        ),
-                        Text(
-                          '₦${order.totalAmount.toStringAsFixed(0)}', 
-                          style: TextStyle(
-                            color: activeTrackingColor, 
-                            fontWeight: FontWeight.w900, 
-                            fontSize: 18
-                          )
-                        ),
-                      ]
-                    ),
-                    Row(
-                      children: const [
-                        Text("View Details", style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.black54)), 
-                        SizedBox(width: 5), 
-                        Icon(Icons.arrow_forward_ios_rounded, size: 14, color: Colors.grey)
-                      ]
-                    ),
-                  ],
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -367,9 +415,10 @@ class _OrderCard extends StatelessWidget {
 
   Color _getStatusColor(String status) {
     final s = status.toUpperCase();
-    if (s.contains('DELIVERED') || s.contains('COLLECTED') || s.contains('SUCCESS')) return Colors.green;
+    if (s.contains('DELIVERED') || s.contains('COLLECTED') || s.contains('COMPLETED')) return Colors.green;
     if (s.contains('CANCELLED') || s.contains('FAILED') || s.contains('REJECTED')) return Colors.red;
     if (s.contains('WAY') || s.contains('TRANSIT') || s.contains('SHIPPED')) return Colors.blue;
-    return const Color(0xFFFE7F2D); 
+    if (s.contains('READY') || s.contains('PICKUP')) return Colors.teal;
+    return const Color(0xFFFE7F2D);
   }
 }

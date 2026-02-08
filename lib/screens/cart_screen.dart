@@ -32,7 +32,7 @@ class CartScreen extends StatelessWidget {
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios_new, color: Colors.black87, size: 20),
           onPressed: () {
-            // --- FIXED: SMART POP LOGIC TO PREVENT BLACK SCREEN ---
+            // --- SMART POP LOGIC TO PREVENT BLACK SCREEN ---
             if (Navigator.of(context).canPop()) {
               Navigator.pop(context);
             } else {
@@ -83,25 +83,30 @@ class CartScreen extends StatelessWidget {
                     final CartItem item = cart.items.values.elementAt(i);
                     
                     // --- REAL-TIME SYNC WRAPPER ---
-                    // This listens to the specific product in Firestore
                     return StreamBuilder<DocumentSnapshot>(
                       stream: FirebaseFirestore.instance.collection('products').doc(productId).snapshots(),
                       builder: (context, snapshot) {
                         if (snapshot.hasData && snapshot.data!.exists) {
                           final prodData = Product.fromFirestore(snapshot.data!);
                           
-                          // Calculate the new effective limit (Stock vs maxPurchaseLimit)
-                          int effectiveLimit = prodData.stock;
-                          if (prodData.maxPurchaseLimit > 0 && prodData.maxPurchaseLimit < prodData.stock) {
-                            effectiveLimit = prodData.maxPurchaseLimit;
-                          }
+                          // Calculate latest limit
+                          int warehouseStock = prodData.stock;
+                          int purchaseLimit = prodData.maxPurchaseLimit;
+                          int effectiveLimit = (purchaseLimit <= 0 || purchaseLimit >= warehouseStock) 
+                                               ? warehouseStock 
+                                               : purchaseLimit;
 
-                          // IF ADMIN REDUCED LIMIT: Automatically shrink the user's cart item
-                          if (item.quantity > effectiveLimit) {
-                            WidgetsBinding.instance.addPostFrameCallback((_) {
-                              cart.setQuantity(productId, effectiveLimit);
-                            });
-                          }
+                          // REAL-TIME SYNC: Updates price and stock limits instantly
+                          WidgetsBinding.instance.addPostFrameCallback((_) {
+                            cart.syncProductData(productId, prodData.price, effectiveLimit);
+                          });
+                        } 
+                        // If product is deleted from Admin Panel, remove from Bag
+                        else if (snapshot.hasData && !snapshot.data!.exists) {
+                          WidgetsBinding.instance.addPostFrameCallback((_) {
+                            cart.removeItem(productId);
+                          });
+                          return const SizedBox.shrink();
                         }
                         
                         return _StylishCartItem(
@@ -117,7 +122,7 @@ class CartScreen extends StatelessWidget {
               ),
             ),
 
-          // --- SECTION 2: WISHLIST HEADER (ALWAYS VISIBLE) ---
+          // --- SECTION 2: WISHLIST HEADER ---
           if (wishlistIds.isNotEmpty)
             SliverToBoxAdapter(
               child: Padding(
@@ -135,7 +140,7 @@ class CartScreen extends StatelessWidget {
               ),
             ),
 
-          // --- SECTION 3: WISHLIST GRID (ALWAYS VISIBLE) ---
+          // --- SECTION 3: WISHLIST GRID ---
           if (wishlistIds.isNotEmpty)
             StreamBuilder<QuerySnapshot>(
               stream: FirebaseFirestore.instance
@@ -170,7 +175,6 @@ class CartScreen extends StatelessWidget {
         ],
       ),
       
-      // --- FLOATING CHECKOUT BAR ---
       bottomSheet: cart.items.isEmpty 
         ? null 
         : _buildStylishCheckoutBar(context, cart, primaryColor),
@@ -386,7 +390,6 @@ class _StylishCartItem extends StatelessWidget {
               label: 'UNDO',
               textColor: primaryColor,
               onPressed: () {
-                // FIXED: Snapped product state for Undo including maxPurchaseLimit
                 cart.addItem(
                   Product(
                     id: productId, name: item.name, price: item.price, imageUrl: item.imageUrl,

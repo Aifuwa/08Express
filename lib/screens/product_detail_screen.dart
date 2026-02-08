@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:eight_express/models/product.dart';
 import 'package:eight_express/providers/cart_provider.dart';
+import 'package:eight_express/providers/user_provider.dart'; 
 import 'package:eight_express/screens/cart_screen.dart';
 
 class ProductDetailScreen extends StatefulWidget {
@@ -16,19 +17,38 @@ class ProductDetailScreen extends StatefulWidget {
 
 class _ProductDetailScreenState extends State<ProductDetailScreen> {
   int _quantity = 1;
-  int _currentImageIndex = 0; // Tracks the current slide
+  int _currentImageIndex = 0; 
+
+  // --- HELPER LOGIC ---
+
+  /// Calculates the maximum allowed quantity based on both 
+  /// warehouse stock and the product's maximum purchase limit.
+  int get _effectiveLimit {
+    int warehouseStock = widget.product.stock;
+    int purchaseLimit = widget.product.maxPurchaseLimit;
+
+    // If limit is 0 or invalid, only warehouse stock matters.
+    if (purchaseLimit <= 0 || purchaseLimit >= warehouseStock) {
+      return warehouseStock;
+    }
+    return purchaseLimit;
+  }
 
   void _increaseQuantity() {
-    // Check if current quantity is less than available stock
-    if (_quantity < widget.product.stock) {
+    // Check if current quantity is less than the effective limit
+    if (_quantity < _effectiveLimit) {
       setState(() {
         _quantity++;
       });
     } else {
-      // Show warning if user tries to exceed stock
+      // Logic for different warning messages
+      String warning = _quantity >= widget.product.stock 
+          ? 'Sorry, only ${widget.product.stock} items available.' 
+          : 'Limit reached: You can only buy ${widget.product.maxPurchaseLimit} units of this item.';
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Sorry, only ${widget.product.stock} items available.'),
+          content: Text(warning),
           backgroundColor: Colors.red,
           duration: const Duration(milliseconds: 1500),
         ),
@@ -69,8 +89,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(ctx, qtyController.text),
-            child:
-                const Text('Set', style: TextStyle(color: Color(0xFFFE7F2D))),
+            child: const Text('Set', style: TextStyle(color: Color(0xFFFE7F2D))),
           ),
         ],
       ),
@@ -79,14 +98,14 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
     if (result != null && result.isNotEmpty) {
       int? val = int.tryParse(result);
       if (val != null && val > 0) {
-        // Validation: Cannot order more than stock
-        if (val > widget.product.stock) {
-          val = widget.product.stock;
+        // Validation: Cannot order more than effective limit
+        if (val > _effectiveLimit) {
+          val = _effectiveLimit;
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
                 content: Text(
-                    'Quantity adjusted to maximum stock (${widget.product.stock})'),
+                    'Quantity adjusted to allowed limit ($val)'),
                 backgroundColor: Colors.orange,
               ),
             );
@@ -100,17 +119,57 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
     }
   }
 
+  // --- CART ADD LOGIC ---
+  void _addToCart(CartProvider cart) {
+    if (widget.product.stock <= 0) return;
+
+    // Try adding to cart via provider logic
+    bool success = cart.addItem(widget.product, quantity: _quantity);
+
+    if (success) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(Icons.check_circle, color: Colors.white),
+              const SizedBox(width: 10),
+              Text('$_quantity x ${widget.product.name} added!'),
+            ],
+          ),
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: Colors.green,
+          duration: const Duration(milliseconds: 1500),
+        ),
+      );
+    } else {
+       // This usually means adding more would exceed stock or limits inside the cart logic
+       ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Cannot add more. Check cart or stock limits.'),
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: Colors.red,
+          duration: Duration(milliseconds: 2000),
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final Size size = MediaQuery.of(context).size;
     const Color orangeColor = Color(0xFFFE7F2D);
+    final userProv = Provider.of<UserProvider>(context);
+    final cart = Provider.of<CartProvider>(context); // Listen to cart for badge
     
     // Logic for Stock Display
     final bool isOutOfStock = widget.product.stock <= 0;
     final bool isLowStock = !isOutOfStock && widget.product.stock <= 10;
     
     // Check if we have reached max capacity for the + button
-    final bool isMaxStockReached = _quantity >= widget.product.stock;
+    final bool isMaxStockReached = _quantity >= _effectiveLimit;
+
+    // Wishlist Status
+    final bool isFavorite = userProv.appUser?.wishlist.contains(widget.product.id) ?? false;
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -122,56 +181,70 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
           padding: const EdgeInsets.only(left: 16.0, top: 8.0, bottom: 8.0),
           child: _buildGlassIcon(
             icon: Icons.arrow_back_ios_new,
+            iconColor: Colors.black87,
             onTap: () => Navigator.pop(context),
           ),
         ),
         actions: [
+          // --- WISHLIST GLASS ICON ---
           Padding(
-            padding: const EdgeInsets.only(right: 16.0, top: 8.0, bottom: 8.0),
-            child: Consumer<CartProvider>(
-              builder: (_, cart, ch) => Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  _buildGlassIcon(
-                    icon: Icons.shopping_cart_outlined,
-                    onTap: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                            builder: (context) => const CartScreen()),
-                      );
-                    },
-                  ),
-                  if (cart.itemCount > 0)
-                    Positioned(
-                      top: -2,
-                      right: -2,
-                      child: Container(
-                        padding: const EdgeInsets.all(4),
-                        decoration: const BoxDecoration(
-                          color: Colors.red,
-                          shape: BoxShape.circle,
-                        ),
-                        child: Text(
-                          '${cart.itemCount}',
-                          style: const TextStyle(
-                              fontSize: 10,
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold),
-                        ),
+            padding: const EdgeInsets.only(top: 8.0, bottom: 8.0),
+            child: _buildGlassIcon(
+              icon: isFavorite ? Icons.favorite : Icons.favorite_border,
+              iconColor: isFavorite ? Colors.red : Colors.black87,
+              onTap: () => userProv.toggleWishlist(widget.product.id),
+            ),
+          ),
+          // --- CART GLASS ICON ---
+          Padding(
+            padding: const EdgeInsets.only(right: 16.0, left: 10, top: 8.0, bottom: 8.0),
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                _buildGlassIcon(
+                  icon: Icons.shopping_cart_outlined,
+                  iconColor: Colors.black87,
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (context) => const CartScreen()),
+                    );
+                  },
+                ),
+                if (cart.itemCount > 0)
+                  Positioned(
+                    top: 0,
+                    right: 0,
+                    child: Container(
+                      padding: const EdgeInsets.all(4),
+                      decoration: const BoxDecoration(
+                        color: Colors.red,
+                        shape: BoxShape.circle,
                       ),
-                    )
-                ],
-              ),
+                      constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
+                      child: Text(
+                        '${cart.itemCount}',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                            fontSize: 10,
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  )
+              ],
             ),
           ),
         ],
       ),
+      
+      // --- BODY ---
       body: SingleChildScrollView(
         padding: const EdgeInsets.only(bottom: 100),
         child: Column(
           children: [
-            // 1. IMAGE CAROUSEL (Updated for Multiple Images)
+            // 1. IMAGE CAROUSEL
             SizedBox(
               height: size.height * 0.45,
               width: double.infinity,
@@ -187,25 +260,24 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                       });
                     },
                     itemBuilder: (context, index) {
-                      // Logic: Use the list if available, else fallback to single imageUrl
                       String imgUrl = widget.product.images.isNotEmpty
                           ? widget.product.images[index]
                           : widget.product.imageUrl;
 
-                      // Hero Tag Logic: Only match the Grid tag on the first image to avoid errors
+                      // Only use Hero for the first image to prevent tag conflicts
                       String heroTag = (index == 0) 
                           ? 'productImage${widget.product.id}' 
-                          : 'productImage${widget.product.id}_$index';
+                          : 'productImage${widget.product.id}_detail_$index';
 
                       return Hero(
                         tag: heroTag,
                         child: Image.network(
                           imgUrl,
-                          fit: BoxFit.cover,
+                          fit: BoxFit.contain, // Changed to contain so whole product shows
                           loadingBuilder: (context, child, loadingProgress) {
                             if (loadingProgress == null) return child;
                             return Container(
-                              color: Colors.grey[100],
+                              color: Colors.grey[50],
                               child: Center(
                                 child: CircularProgressIndicator(
                                   value: loadingProgress.expectedTotalBytes != null
@@ -228,7 +300,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                     },
                   ),
 
-                  // Bottom Gradient
+                  // Gradient Overlay for visibility
                   Positioned(
                     bottom: 0,
                     left: 0,
@@ -241,14 +313,14 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                           end: Alignment.bottomCenter,
                           colors: [
                             Colors.transparent,
-                            Colors.black.withOpacity(0.1)
+                            Colors.black.withOpacity(0.05)
                           ],
                         ),
                       ),
                     ),
                   ),
 
-                  // Dot Indicators (Only show if more than 1 image)
+                  // Page Indicator
                   if (widget.product.images.length > 1)
                     Positioned(
                       bottom: 40,
@@ -261,14 +333,13 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                           (index) => AnimatedContainer(
                             duration: const Duration(milliseconds: 300),
                             margin: const EdgeInsets.symmetric(horizontal: 4),
-                            height: 8,
-                            width: _currentImageIndex == index ? 20 : 8,
+                            height: 6,
+                            width: _currentImageIndex == index ? 20 : 6,
                             decoration: BoxDecoration(
                               color: _currentImageIndex == index 
                                   ? orangeColor 
-                                  : Colors.white.withOpacity(0.8),
+                                  : Colors.grey.withOpacity(0.5),
                               borderRadius: BorderRadius.circular(4),
-                              boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 4)]
                             ),
                           ),
                         ),
@@ -278,9 +349,9 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
               ),
             ),
 
-            // 2. CONTENT
+            // 2. PRODUCT DETAILS SHEET
             Transform.translate(
-              offset: const Offset(0, -30),
+              offset: const Offset(0, -20),
               child: Container(
                 width: double.infinity,
                 decoration: const BoxDecoration(
@@ -293,7 +364,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                         offset: Offset(0, -5))
                   ],
                 ),
-                padding: const EdgeInsets.fromLTRB(20, 10, 20, 20),
+                padding: const EdgeInsets.fromLTRB(24, 12, 24, 24),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -309,6 +380,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                       ),
                     ),
 
+                    // Category Tag
                     Container(
                       padding: const EdgeInsets.symmetric(
                           horizontal: 10, vertical: 5),
@@ -326,8 +398,9 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                         ),
                       ),
                     ),
-                    const SizedBox(height: 10),
+                    const SizedBox(height: 12),
 
+                    // Name & Price
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -336,27 +409,27 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                           child: Text(
                             widget.product.name,
                             style: const TextStyle(
-                              fontSize: 24,
+                              fontSize: 22,
                               fontWeight: FontWeight.w800,
                               color: Colors.black87,
-                              height: 1.1,
+                              height: 1.2,
                             ),
                           ),
                         ),
-                        const SizedBox(width: 10),
+                        const SizedBox(width: 15),
                         Text(
-                          '\₦${widget.product.price.toStringAsFixed(0)}',
+                          '₦${widget.product.price.toStringAsFixed(0)}',
                           style: const TextStyle(
-                            fontSize: 24,
+                            fontSize: 22,
                             fontWeight: FontWeight.w900,
                             color: orangeColor,
                           ),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 15),
+                    const SizedBox(height: 8),
 
-                    // --- STOCK STATUS ROW UPDATED ---
+                    // Stock Status
                     Row(
                       children: [
                         Container(
@@ -374,7 +447,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                           isOutOfStock
                               ? 'Out of Stock'
                               : (isLowStock
-                                  ? 'Only ${widget.product.stock} left!'
+                                  ? 'Low Stock: Only ${widget.product.stock} left'
                                   : 'In Stock'),
                           style: TextStyle(
                             color: isOutOfStock
@@ -382,6 +455,7 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                                 : (isLowStock
                                     ? Colors.orange
                                     : Colors.green[700]),
+                            fontSize: 13,
                             fontWeight: FontWeight.w600,
                           ),
                         ),
@@ -399,77 +473,62 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
                     ),
                     const SizedBox(height: 10),
                     Text(
-                      widget.product.description,
+                      widget.product.description.isEmpty 
+                          ? "No description available." 
+                          : widget.product.description,
                       style: TextStyle(
                           fontSize: 15, height: 1.6, color: Colors.grey[600]),
                     ),
 
                     const SizedBox(height: 30),
 
-                    // Quantity Section
+                    // Quantity Selector
                     if (!isOutOfStock) ...[
-                      const Text(
-                        "Quantity",
-                        style: TextStyle(
-                            fontSize: 18, fontWeight: FontWeight.bold),
-                      ),
-                      const SizedBox(height: 15),
-                      Container(
-                        width: 140,
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 5, vertical: 5),
-                        decoration: BoxDecoration(
-                          color: Colors.grey[100],
-                          borderRadius: BorderRadius.circular(30),
-                          border: Border.all(color: Colors.grey[300]!),
-                        ),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            GestureDetector(
-                              onTap: _decreaseQuantity,
-                              child: Container(
-                                width: 35,
-                                height: 35,
-                                decoration: const BoxDecoration(
-                                  color: Colors.white,
-                                  shape: BoxShape.circle,
-                                ),
-                                child: const Icon(Icons.remove, size: 18),
-                              ),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text(
+                            "Quantity",
+                            style: TextStyle(
+                                fontSize: 18, fontWeight: FontWeight.bold),
+                          ),
+                          Container(
+                            decoration: BoxDecoration(
+                              color: Colors.grey[100],
+                              borderRadius: BorderRadius.circular(30),
+                              border: Border.all(color: Colors.grey[300]!),
                             ),
-
-                            // --- CLICKABLE QUANTITY TEXT ---
-                            GestureDetector(
-                              onTap: _showManualQuantityDialog,
-                              child: Padding(
-                                padding:
-                                    const EdgeInsets.symmetric(horizontal: 8.0),
-                                child: Text(
-                                  '$_quantity',
-                                  style: const TextStyle(
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.bold),
+                            child: Row(
+                              children: [
+                                IconButton(
+                                  onPressed: _decreaseQuantity,
+                                  icon: const Icon(Icons.remove, size: 18),
+                                  constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
                                 ),
-                              ),
-                            ),
-
-                            GestureDetector(
-                              onTap: isMaxStockReached ? null : _increaseQuantity,
-                              child: Container(
-                                width: 35,
-                                height: 35,
-                                decoration: BoxDecoration(
-                                  // Change color if max stock reached
-                                  color: isMaxStockReached ? Colors.grey : Colors.black,
-                                  shape: BoxShape.circle,
+                                GestureDetector(
+                                  onTap: _showManualQuantityDialog,
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                                    child: Text(
+                                      '$_quantity',
+                                      style: const TextStyle(
+                                          fontSize: 18,
+                                          fontWeight: FontWeight.bold),
+                                    ),
+                                  ),
                                 ),
-                                child: const Icon(Icons.add,
-                                    color: Colors.white, size: 18),
-                              ),
+                                IconButton(
+                                  onPressed: isMaxStockReached ? null : _increaseQuantity,
+                                  icon: Icon(Icons.add, 
+                                      size: 18, 
+                                      color: isMaxStockReached ? Colors.grey : Colors.black
+                                  ),
+                                  constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+                                ),
+                              ],
                             ),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
                     ],
                   ],
@@ -480,9 +539,9 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
         ),
       ),
 
-      // --- FIXED GRADIENT BUTTON SECTION ---
+      // --- BOTTOM ACTION BAR ---
       bottomNavigationBar: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 15.0),
+        padding: const EdgeInsets.fromLTRB(20, 10, 20, 30), // Extra bottom padding for iOS home bar
         decoration: BoxDecoration(
           color: Colors.white,
           boxShadow: [
@@ -493,68 +552,36 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
             ),
           ],
         ),
-        child: SafeArea(
-          child: Container(
-            height: 55,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(15),
-              gradient: !isOutOfStock
-                  ? const LinearGradient(
-                      colors: [Color(0xFFFE7F2D), Color(0xFFFFB347)],
-                      begin: Alignment.centerLeft,
-                      end: Alignment.centerRight,
-                    )
-                  : const LinearGradient(
-                      colors: [Colors.grey, Colors.grey]),
-              boxShadow: !isOutOfStock
-                  ? [
-                      BoxShadow(
-                        color: orangeColor.withOpacity(0.4),
-                        blurRadius: 10,
-                        offset: const Offset(0, 5),
-                      )
-                    ]
-                  : [],
+        child: SizedBox(
+          height: 55,
+          child: ElevatedButton(
+            onPressed: !isOutOfStock
+                ? () => _addToCart(cart)
+                : null,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: isOutOfStock ? Colors.grey : orangeColor,
+              disabledBackgroundColor: Colors.grey[300],
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(15)),
+              elevation: isOutOfStock ? 0 : 5,
             ),
-            child: ElevatedButton.icon(
-              onPressed: !isOutOfStock
-                  ? () {
-                      bool success = Provider.of<CartProvider>(context, listen: false)
-                          .addItem(widget.product, quantity: _quantity);
-
-                      if (success) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text('$_quantity x ${widget.product.name} added!'),
-                            behavior: SnackBarBehavior.floating,
-                            backgroundColor: Colors.green,
-                            duration: const Duration(seconds: 1),
-                          ),
-                        );
-                      } else {
-                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Cannot add. Maximum stock reached in cart.'),
-                            behavior: SnackBarBehavior.floating,
-                            backgroundColor: Colors.red,
-                            duration: Duration(seconds: 2),
-                          ),
-                        );
-                      }
-                    }
-                  : null,
-              icon: Icon(isOutOfStock
-                  ? Icons.remove_shopping_cart
-                  : Icons.shopping_bag_outlined),
-              label: Text(isOutOfStock ? 'Sold Out' : 'Add to Cart'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.transparent,
-                shadowColor: Colors.transparent,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(15)),
-                textStyle: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-              ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  isOutOfStock ? Icons.remove_shopping_cart : Icons.shopping_bag_outlined, 
+                  color: Colors.white
+                ),
+                const SizedBox(width: 10),
+                Text(
+                  isOutOfStock ? 'Sold Out' : 'Add to Cart',
+                  style: const TextStyle(
+                    fontSize: 18, 
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white
+                  ),
+                ),
+              ],
             ),
           ),
         ),
@@ -562,8 +589,9 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
     );
   }
 
+  // --- REUSABLE GLASS ICON HELPER ---
   Widget _buildGlassIcon(
-      {required IconData icon, required VoidCallback onTap}) {
+      {required IconData icon, required VoidCallback onTap, Color? iconColor}) {
     return ClipRRect(
       borderRadius: BorderRadius.circular(30),
       child: BackdropFilter(
@@ -574,11 +602,13 @@ class _ProductDetailScreenState extends State<ProductDetailScreen> {
             width: 40,
             height: 40,
             decoration: BoxDecoration(
-              color: Colors.black.withOpacity(0.1),
+              color: Colors.white.withOpacity(0.8), // Slightly more opaque for better visibility
               shape: BoxShape.circle,
-              border: Border.all(color: Colors.white.withOpacity(0.2)),
+              boxShadow: [
+                BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 4)
+              ]
             ),
-            child: Icon(icon, color: Colors.red, size: 20),
+            child: Icon(icon, color: iconColor ?? Colors.black87, size: 20),
           ),
         ),
       ),

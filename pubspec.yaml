@@ -59,6 +59,7 @@ dependencies:
   firebase_analytics: ^12.1.0
   package_info_plus: ^8.0.0 # Required for Force Update logic
   firebase_crashlytics: ^5.0.6
+  shimmer: ^3.0.0
 
   
 dev_dependencies:

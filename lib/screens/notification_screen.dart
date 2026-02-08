@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:eight_express/models/app_notification.dart';
@@ -10,8 +11,7 @@ class NotificationScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final service = NotificationService();
-    const Color orange = Color(0xFFFE7F2D);
-
+    
     return Scaffold(
       backgroundColor: const Color(0xFFF8F9FA),
       appBar: AppBar(
@@ -25,10 +25,32 @@ class NotificationScreen extends StatelessWidget {
         ],
       ),
       body: StreamBuilder<List<AppNotification>>(
-        stream: service.getNotifications(),
+        // Added Timeout to detect Indexing issues
+        stream: service.getNotifications().timeout(const Duration(seconds: 5)),
         builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CustomLoader(size: 60));
-          if (!snapshot.hasData || snapshot.data!.isEmpty) return _buildEmptyState();
+          
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CustomLoader(size: 60));
+          }
+
+          // Error Handling (Usually Indexing issue)
+          if (snapshot.hasError) {
+             // Check debug console for the link to create index
+             return Center(
+               child: Padding(
+                 padding: const EdgeInsets.all(20.0),
+                 child: Text(
+                   "Error loading notifications.\n\nCheck your debug console for a Firebase Index link, or try again later.", 
+                   textAlign: TextAlign.center,
+                   style: TextStyle(color: Colors.red.shade300),
+                 ),
+               ),
+             );
+          }
+
+          if (!snapshot.hasData || snapshot.data!.isEmpty) {
+            return _buildEmptyState();
+          }
 
           final notifications = snapshot.data!;
 
@@ -101,7 +123,11 @@ class _NotificationTile extends StatelessWidget {
             const SizedBox(height: 5),
             Text(note.body, style: TextStyle(color: Colors.grey[700], fontSize: 13)),
             const SizedBox(height: 8),
-            Text(DateFormat('MMM dd, hh:mm a').format(note.timestamp), style: const TextStyle(fontSize: 11, color: Colors.grey)),
+            Text(
+              // Safe timestamp formatting
+              DateFormat('MMM dd, hh:mm a').format(note.timestamp), 
+              style: const TextStyle(fontSize: 11, color: Colors.grey)
+            ),
           ],
         ),
       ),

@@ -14,11 +14,14 @@ class UserProvider with ChangeNotifier {
   User? _firebaseUser;
   AppUser? _appUser;
   
-  // State Flags
+  // --- STATE FLAGS ---
   bool _isGuestMode = false;
   bool _isLoading = true; 
   bool _isProfileLoaded = false; 
+  
+  // Onboarding / Intro State
   bool _isFirstTime = true; 
+  bool _isIntroCheckDone = false; // New: confirms Prefs have been read
   bool _isTransitioning = false; 
 
   // Phone Auth State
@@ -32,22 +35,27 @@ class UserProvider with ChangeNotifier {
 
   Future<void> _initUserProvider() async {
     try {
-      // 1. Load Intro Status
+      // 1. Load Local Storage (Onboarding Status)
       final prefs = await SharedPreferences.getInstance();
       _isFirstTime = prefs.getBool('is_first_time') ?? true;
+      _isIntroCheckDone = true; 
+      // Notify immediately so AuthWrapper knows it can proceed
+      notifyListeners(); 
       
-      // 2. Listen to Auth Changes
+      // 2. Listen to Persistent Auth Changes (Keeps user logged in)
       _auth.authStateChanges().listen((firebaseUser) async {
         _firebaseUser = firebaseUser;
         
         if (_firebaseUser != null) {
-          // FIX 1: Immediately turn off guest mode so UI doesn't get confused
+          // User is logged in
           _isGuestMode = false;
-          
+          _isLoading = true; // Show loader while fetching profile
+          notifyListeners();
+
           // Load the specific user profile from Firestore
           await fetchUserProfile();
         } else {
-          // Reset state on logout
+          // User is logged out
           _appUser = null;
           _isProfileLoaded = false;
           _isGuestMode = false;
@@ -59,6 +67,7 @@ class UserProvider with ChangeNotifier {
     } catch (e) {
       debugPrint("Initialization Error: $e");
       _isLoading = false;
+      _isIntroCheckDone = true; // Ensure we don't get stuck
       notifyListeners();
     }
   }
@@ -70,8 +79,11 @@ class UserProvider with ChangeNotifier {
   bool get isGuest => _isGuestMode;
   bool get isLoading => _isLoading; 
   bool get isProfileLoaded => _isProfileLoaded;
-  bool get isFirstTime => _isFirstTime;
   bool get isTransitioning => _isTransitioning;
+  
+  // Gatekeeper Getters
+  bool get isFirstTime => _isFirstTime;
+  bool get isIntroCheckDone => _isIntroCheckDone;
 
   // --- CORE PROFILE MANAGEMENT ---
 
@@ -88,7 +100,7 @@ class UserProvider with ChangeNotifier {
       
       if (doc.exists) {
         _appUser = AppUser.fromFirestore(doc);
-        _isGuestMode = false; // Ensure guest mode is off
+        _isGuestMode = false; 
 
         // DATA REPAIR: If Firestore has no email, but Auth does, patch it.
         if ((_appUser!.email == null || _appUser!.email!.isEmpty) && _firebaseUser?.email != null) {
@@ -111,7 +123,6 @@ class UserProvider with ChangeNotifier {
   }
 
   /// Creates the database entry for a new user.
-  /// FIX 2: Updates local state BEFORE Firestore to prevent "Guest" flash.
   Future<void> createInitialUserDocument(User user) async {
     try {
       final docRef = _firestore.collection('users').doc(user.uid);
@@ -123,12 +134,12 @@ class UserProvider with ChangeNotifier {
           email: user.email, 
           name: user.displayName ?? (user.email != null ? user.email!.split('@')[0] : "User"),
           isAdmin: false,
-          setupComplete: false, // <--- CRITICAL FOR MODAL TRIGGER
+          setupComplete: false, 
           wishlist: [],
           addresses: [],
         );
 
-        // FIX: Update local state immediately for UI responsiveness
+        // Update local state immediately for UI responsiveness
         _appUser = newUser;
         _isProfileLoaded = true;
         _isGuestMode = false;
@@ -174,11 +185,11 @@ class UserProvider with ChangeNotifier {
         'name': name,
         'phoneNumber': phone,
         'addresses': [address.toMap()],
-        'setupComplete': true, // <--- Marks onboarding as done
+        'setupComplete': true, 
         'updatedAt': FieldValue.serverTimestamp(),
       });
 
-      // Update Local State directly to avoid waiting for another fetch
+      // Update Local State directly 
       if (_appUser != null) {
         _appUser!.name = name;
         _appUser!.phoneNumber = phone;
@@ -186,7 +197,6 @@ class UserProvider with ChangeNotifier {
         _appUser!.setupComplete = true;
         notifyListeners();
       } else {
-        // Fallback reload
         await fetchUserProfile();
       }
     } catch (e) {
@@ -275,11 +285,9 @@ class UserProvider with ChangeNotifier {
   Future<void> deleteAccount(String password) async {
     User? user = _auth.currentUser;
     if (user != null && user.email != null) {
-      // Re-authenticate first
       AuthCredential cred = EmailAuthProvider.credential(email: user.email!, password: password);
       await user.reauthenticateWithCredential(cred);
       
-      // Delete data then user
       await _firestore.collection('users').doc(user.uid).delete();
       await user.delete();
       await signOut();
@@ -296,6 +304,7 @@ class UserProvider with ChangeNotifier {
     notifyListeners();
   }
 
+  /// CRITICAL: Call this when user clicks "Get Started" on Onboarding Screen
   Future<void> completeIntro() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('is_first_time', false);
@@ -315,6 +324,7 @@ class UserProvider with ChangeNotifier {
     _isGuestMode = false; 
     _isProfileLoaded = false; 
     _isTransitioning = false;
+    // Note: We do NOT reset _isFirstTime here, because they have already seen intro.
     notifyListeners(); 
   }
 
