@@ -1,11 +1,5 @@
-import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:shared_preferences/shared_preferences.dart'; // ADDED
-import 'package:eight_express/screens/home_screen.dart';
-import 'package:eight_express/screens/auth_screen.dart';
-import 'package:eight_express/screens/onboarding_screen.dart'; // ADDED
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -15,86 +9,92 @@ class SplashScreen extends StatefulWidget {
 }
 
 class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMixin {
-  late AnimationController _mainController;
-  late AnimationController _rotationController;
+  // Controllers for different layers of animation to ensure smooth orchestration
+  late AnimationController _mainController;     // Handles logo and footer entry
+  late AnimationController _rotationController; // Handles continuous orbit rotation
+  late AnimationController _pulseController;    // Handles the breathing background glow
   
+  // Specific animation definitions
   late Animation<double> _logoScale;
   late Animation<double> _logoOpacity;
   late Animation<double> _glowScale;
   late Animation<double> _footerOpacity;
+  late Animation<double> _loadingWidth;
 
   @override
   void initState() {
     super.initState();
 
+    // 1. Setup the Main Entry Controller
     _mainController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 2500),
     );
 
+    // 2. Setup the Continuous Rotation Controller (Orbits)
     _rotationController = AnimationController(
       vsync: this,
-      duration: const Duration(seconds: 3),
+      duration: const Duration(seconds: 4),
     )..repeat();
 
-    _logoScale = Tween<double>(begin: 0.5, end: 1.0).animate(
-      CurvedAnimation(parent: _mainController, curve: const Interval(0.0, 0.6, curve: Curves.elasticOut)),
+    // 3. Setup the Pulse Controller (Background breathing effect)
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 2),
+    )..repeat(reverse: true);
+
+    // --- DEFINE TWEENS ---
+
+    // Logo pops in with an elastic effect
+    _logoScale = Tween<double>(begin: 0.4, end: 1.0).animate(
+      CurvedAnimation(
+        parent: _mainController, 
+        curve: const Interval(0.0, 0.7, curve: Curves.elasticOut),
+      ),
     );
 
+    // Logo fades in early
     _logoOpacity = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(parent: _mainController, curve: const Interval(0.0, 0.4, curve: Curves.easeIn)),
+      CurvedAnimation(
+        parent: _mainController, 
+        curve: const Interval(0.0, 0.4, curve: Curves.easeIn),
+      ),
     );
 
-    _glowScale = Tween<double>(begin: 0.8, end: 1.5).animate(
-      CurvedAnimation(parent: _mainController, curve: const Interval(0.3, 1.0, curve: Curves.easeInOut)),
+    // Background glow pulses between sizes
+    _glowScale = Tween<double>(begin: 1.0, end: 1.4).animate(
+      CurvedAnimation(
+        parent: _pulseController, 
+        curve: Curves.easeInOut,
+      ),
     );
 
+    // Footer text appears towards the end of the splash
     _footerOpacity = Tween<double>(begin: 0.0, end: 1.0).animate(
-      CurvedAnimation(parent: _mainController, curve: const Interval(0.7, 1.0, curve: Curves.easeIn)),
+      CurvedAnimation(
+        parent: _mainController, 
+        curve: const Interval(0.7, 1.0, curve: Curves.easeIn),
+      ),
     );
 
+    // Visual progress bar that fills up smoothly
+    _loadingWidth = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(
+        parent: _mainController, 
+        curve: const Interval(0.2, 0.9, curve: Curves.easeInOut),
+      ),
+    );
+
+    // Trigger the entry animations
     _mainController.forward();
-
-    // --- UPDATED NAVIGATION LOGIC ---
-    // Wait for 3 seconds, then run the async check
-    Timer(const Duration(seconds: 3), () {
-      _checkAuthAndNavigate();
-    });
-  }
-
-  // Changed to async to handle SharedPreferences
-  void _checkAuthAndNavigate() async {
-    if (!mounted) return;
-
-    // 1. Check if it's the first time
-    final prefs = await SharedPreferences.getInstance();
-    final bool isFirstTime = prefs.getBool('isFirstTime') ?? true;
-    
-    // 2. Check Firebase Auth status
-    User? user = FirebaseAuth.instance.currentUser;
-    
-    if (isFirstTime) {
-      // GO TO ONBOARDING (First time ever)
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const OnboardingScreen()),
-      );
-    } else if (user != null) {
-      // GO TO HOME (Returning & Logged in)
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const HomeScreen()),
-      );
-    } else {
-      // GO TO LOGIN (Returning but Logged out)
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const AuthScreen()),
-      );
-    }
   }
 
   @override
   void dispose() {
+    // Clean up controllers to prevent memory leaks
     _mainController.dispose();
     _rotationController.dispose();
+    _pulseController.dispose();
     super.dispose();
   }
 
@@ -108,19 +108,22 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
         fit: StackFit.expand,
         alignment: Alignment.center,
         children: [
+          // LAYER 1: Glassmorphic Background Pulsing Glow
           Center(
             child: AnimatedBuilder(
-              animation: _mainController,
+              animation: _pulseController,
               builder: (context, child) {
-                return Opacity(
-                  opacity: (1.0 - _mainController.value) * 0.3,
-                  child: Transform.scale(
-                    scale: _glowScale.value,
-                    child: Container(
-                      width: 250, height: 250,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        gradient: RadialGradient(colors: [primaryOrange.withOpacity(0.5), Colors.transparent]),
+                return Transform.scale(
+                  scale: _glowScale.value,
+                  child: Container(
+                    width: 280, height: 280,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: RadialGradient(
+                        colors: [
+                          primaryOrange.withOpacity(0.15), 
+                          Colors.transparent,
+                        ],
                       ),
                     ),
                   ),
@@ -128,6 +131,8 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
               },
             ),
           ),
+
+          // LAYER 2: Outer Orbit (Clockwise Rotation)
           Center(
             child: AnimatedBuilder(
               animation: _rotationController,
@@ -135,13 +140,37 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
                 return Transform.rotate(
                   angle: _rotationController.value * 2 * math.pi,
                   child: CustomPaint(
-                    size: const Size(230, 230),
-                    painter: _SplashOrbitPainter(color: primaryOrange.withOpacity(0.4)),
+                    size: const Size(260, 260),
+                    painter: _SplashOrbitPainter(
+                      color: primaryOrange.withOpacity(0.1),
+                      strokeWidth: 1.5,
+                    ),
                   ),
                 );
               },
             ),
           ),
+
+          // LAYER 3: Inner Orbit (Counter-Clockwise Rotation)
+          Center(
+            child: AnimatedBuilder(
+              animation: _rotationController,
+              builder: (context, child) {
+                return Transform.rotate(
+                  angle: -_rotationController.value * 2 * math.pi,
+                  child: CustomPaint(
+                    size: const Size(200, 200),
+                    painter: _SplashOrbitPainter(
+                      color: primaryOrange.withOpacity(0.35),
+                      strokeWidth: 3.5,
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+
+          // LAYER 4: The Main App Logo
           Center(
             child: AnimatedBuilder(
               animation: _mainController,
@@ -151,18 +180,25 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
                   child: Transform.scale(
                     scale: _logoScale.value,
                     child: Container(
-                      padding: const EdgeInsets.all(25),
+                      padding: const EdgeInsets.all(28),
                       decoration: BoxDecoration(
                         color: Colors.white,
                         shape: BoxShape.circle,
                         boxShadow: [
-                          BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 30, offset: const Offset(0, 10))
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.1), 
+                            blurRadius: 40, 
+                            offset: const Offset(0, 15),
+                          )
                         ],
                       ),
-                      child: Image.asset(
-                        'assets/logo.png', 
-                        width: 110, height: 110,
-                        fit: BoxFit.contain,
+                      child: Hero(
+                        tag: 'appLogo', // Used for smooth transitions to Home
+                        child: Image.asset(
+                          'assets/logo.png', 
+                          width: 115, height: 115,
+                          fit: BoxFit.contain,
+                        ),
                       ),
                     ),
                   ),
@@ -170,8 +206,10 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
               },
             ),
           ),
+
+          // LAYER 5: Visual Loading Bar and Footer Branding
           Positioned(
-            bottom: 70,
+            bottom: 80,
             left: 0,
             right: 0,
             child: FadeTransition(
@@ -179,11 +217,58 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Text("08Express", 
-                    style: TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: Colors.black87, letterSpacing: 2)),
-                  const SizedBox(height: 5),
-                  Text("by 08Vic Enterprises © 2026", 
-                    style: TextStyle(fontSize: 12, color: Colors.grey.shade400, fontWeight: FontWeight.w500)),
+                  // Smooth animated loading indicator
+                  Container(
+                    width: 180,
+                    height: 3.5,
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade100,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Stack(
+                      children: [
+                        AnimatedBuilder(
+                          animation: _loadingWidth,
+                          builder: (context, child) => FractionallySizedBox(
+                            alignment: Alignment.centerLeft,
+                            widthFactor: _loadingWidth.value,
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: primaryOrange.withOpacity(0.7),
+                                borderRadius: BorderRadius.circular(10),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: primaryOrange.withOpacity(0.3),
+                                    blurRadius: 5,
+                                  )
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 35),
+                  const Text(
+                    "08Express", 
+                    style: TextStyle(
+                      fontSize: 24, 
+                      fontWeight: FontWeight.w900, 
+                      color: Colors.black87, 
+                      letterSpacing: 4,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    "by 08Vic Enterprises © 2026", 
+                    style: TextStyle(
+                      fontSize: 12, 
+                      color: Colors.grey.shade400, 
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: 1.5,
+                    ),
+                  ),
                 ],
               ),
             ),
@@ -194,15 +279,55 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
   }
 }
 
+// ==========================================
+// CUSTOM PAINTER FOR ORBITAL ARCS
+// ==========================================
 class _SplashOrbitPainter extends CustomPainter {
   final Color color;
-  _SplashOrbitPainter({required this.color});
+  final double strokeWidth;
+
+  _SplashOrbitPainter({
+    required this.color, 
+    this.strokeWidth = 3.0,
+  });
+
   @override
   void paint(Canvas canvas, Size size) {
-    Paint paint = Paint()..color = color..strokeWidth = 3..strokeCap = StrokeCap.round..style = PaintingStyle.stroke;
-    canvas.drawArc(Rect.fromLTWH(0, 0, size.width, size.height), 0, math.pi / 1.5, false, paint);
-    canvas.drawArc(Rect.fromLTWH(0, 0, size.width, size.height), math.pi, math.pi / 4, false, paint);
+    Paint paint = Paint()
+      ..color = color
+      ..strokeWidth = strokeWidth
+      ..strokeCap = StrokeCap.round
+      ..style = PaintingStyle.stroke;
+
+    // Drawing three distinct artistic segments for the orbits
+    // Segment 1
+    canvas.drawArc(
+      Rect.fromLTWH(0, 0, size.width, size.height), 
+      0, 
+      math.pi / 1.5, 
+      false, 
+      paint,
+    );
+
+    // Segment 2
+    canvas.drawArc(
+      Rect.fromLTWH(0, 0, size.width, size.height), 
+      math.pi, 
+      math.pi / 4, 
+      false, 
+      paint,
+    );
+
+    // Segment 3
+    canvas.drawArc(
+      Rect.fromLTWH(0, 0, size.width, size.height), 
+      math.pi * 1.5, 
+      math.pi / 8, 
+      false, 
+      paint,
+    );
   }
+
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

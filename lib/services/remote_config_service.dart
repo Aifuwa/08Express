@@ -17,6 +17,11 @@ class RemoteConfigService {
     }
   }
 
+  static String getRegionsJson() {
+    // This looks for the key we created in Part A
+    return FirebaseRemoteConfig.instance.getString('delivery_regions');
+  }
+
   /// 1. Maintenance Mode
   static bool get isMaintenance => _rc.getBool('is_under_maintenance');
 

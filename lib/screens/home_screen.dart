@@ -10,15 +10,19 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:package_info_plus/package_info_plus.dart'; 
 import 'package:url_launcher/url_launcher.dart'; 
 import 'package:firebase_remote_config/firebase_remote_config.dart'; 
-import 'package:shimmer/shimmer.dart'; // Added Shimmer
+import 'package:shimmer/shimmer.dart'; 
 
+// Model & Provider Imports
 import 'package:eight_express/models/product.dart';
 import 'package:eight_express/models/app_notification.dart'; 
+import 'package:eight_express/models/app_user.dart';
 import 'package:eight_express/providers/cart_provider.dart';
 import 'package:eight_express/providers/user_provider.dart';
+import 'package:eight_express/providers/category_provider.dart';
 import 'package:eight_express/services/remote_config_service.dart';
 import 'package:eight_express/services/notification_service.dart'; 
 
+// Screen & Widget Imports
 import 'package:eight_express/screens/product_detail_screen.dart';
 import 'package:eight_express/screens/product_listing_screen.dart'; 
 import 'package:eight_express/screens/cart_screen.dart';
@@ -44,18 +48,12 @@ class _HomeScreenState extends State<HomeScreen> {
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
   Timer? _debounce;
+  bool _onboardingShown = false; 
   
   Color get _primaryColor => RemoteConfigService.getPrimaryColor();
 
-  String _getGreeting() {
-    var hour = DateTime.now().hour;
-    if (hour < 12) return 'Good Morning,';
-    if (hour < 17) return 'Good Afternoon,';
-    return 'Good Evening,';
-  }
-
   final List<Widget> _widgetOptions = <Widget>[
-    Container(), 
+    Container(), // Placeholder for PaginatedHomeContent
     const CategoriesScreen(),
     const WishlistScreen(),
     const CartScreen(),
@@ -70,7 +68,15 @@ class _HomeScreenState extends State<HomeScreen> {
       _checkOnboarding();
       _checkVersion(); 
       _showPromoPopup();
+      Provider.of<CategoryProvider>(context, listen: false).fetchCategories();
     });
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    _debounce?.cancel();
+    super.dispose();
   }
 
   void _onSearchChanged() {
@@ -82,20 +88,42 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
+  String _getGreeting() {
+    var hour = DateTime.now().hour;
+    if (hour < 12) return 'Good Morning,';
+    if (hour < 17) return 'Good Afternoon,';
+    return 'Good Evening,';
+  }
+
+  // ============================================================
+  // CRITICAL FIX: ONBOARDING MODAL LOGIC (WAIT FOR FIREBASE)
+  // ============================================================
   void _checkOnboarding() async {
+    if (_onboardingShown) return;
+    
     final userProv = Provider.of<UserProvider>(context, listen: false);
+    
+    // 1. If it's a Guest, don't show the onboarding
+    if (userProv.isGuest) return;
+
+    // 2. If nobody is logged in to Firebase yet, don't show it
+    if (FirebaseAuth.instance.currentUser == null) return;
+
+    // 3. WAIT MECHANISM: Wait for the UserProvider to finish its async fetch
     int retryCount = 0;
-    while (!userProv.isProfileLoaded && retryCount < 15) {
-      await Future.delayed(const Duration(milliseconds: 300));
+    // Loop until loading is false, profile is marked as loaded, and appUser is hydrated
+    while ((userProv.isLoading || !userProv.isProfileLoaded || userProv.appUser == null) && retryCount < 40) {
+      await Future.delayed(const Duration(milliseconds: 400));
       retryCount++;
     }
-    if (FirebaseAuth.instance.currentUser != null && userProv.appUser == null) {
-       await userProv.fetchUserProfile(); 
-    }
+
     if (!mounted) return;
+
+    // 4. Final check: Only show if the profile is definitely loaded and setup is incomplete
     final user = userProv.appUser;
     if (user != null && user.setupComplete == false) {
-      await Future.delayed(const Duration(milliseconds: 700));
+      _onboardingShown = true; 
+      await Future.delayed(const Duration(milliseconds: 600));
       if (mounted) _showOnboardingModal();
     }
   }
@@ -112,43 +140,67 @@ class _HomeScreenState extends State<HomeScreen> {
       isScrollControlled: true,
       isDismissible: false,
       enableDrag: false,
+      backgroundColor: Colors.white,
       shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(30))),
-      builder: (ctx) => Padding(
-        padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom, left: 25, right: 25, top: 25),
-        child: SingleChildScrollView(
-          child: Column(mainAxisSize: MainAxisSize.min, children: [
-            const Icon(Icons.stars_rounded, color: Colors.amber, size: 55),
-            const SizedBox(height: 12),
-            const Text("Delivery Setup", style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
-            const Text("Please complete your profile to enable shopping.", style: TextStyle(color: Colors.grey), textAlign: TextAlign.center),
-            const SizedBox(height: 20),
-            _buildDialogField(nameCtrl, "Full Name", Icons.person_outline),
-            _buildDialogField(phoneCtrl, "Phone Number", Icons.phone_android_rounded),
-            _buildDialogField(streetCtrl, "Delivery Street Address", Icons.home_outlined),
-            _buildDialogField(cityCtrl, "City/Area", Icons.location_on_outlined),
-            const SizedBox(height: 30),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: _primaryColor, 
-                minimumSize: const Size(double.infinity, 55), 
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15))
-              ),
-              onPressed: () async {
-                if (phoneCtrl.text.isEmpty || streetCtrl.text.isEmpty || nameCtrl.text.isEmpty || cityCtrl.text.isEmpty) {
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("All fields are mandatory")));
-                  return;
-                }
-                await userProv.completeProfileSetup(name: nameCtrl.text, phone: phoneCtrl.text, street: streetCtrl.text, city: cityCtrl.text, state: "Lagos");
-                if (mounted) {
-                   Navigator.pop(ctx);
-                   ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Your profile is now active!"), behavior: SnackBarBehavior.floating));
-                }
-              },
-              child: const Text("SAVE AND CONTINUE", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+      builder: (ctx) => StatefulBuilder(
+        builder: (BuildContext modalContext, StateSetter setModalState) {
+          bool isSaving = false;
+          return Padding(
+            padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom, left: 25, right: 25, top: 25),
+            child: SingleChildScrollView(
+              child: Column(mainAxisSize: MainAxisSize.min, children: [
+                const Icon(Icons.stars_rounded, color: Colors.amber, size: 55),
+                const SizedBox(height: 12),
+                const Text("Delivery Setup", style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+                const Text("Please complete your profile to enable shopping.", style: TextStyle(color: Colors.grey), textAlign: TextAlign.center),
+                const SizedBox(height: 20),
+                _buildDialogField(nameCtrl, "Full Name", Icons.person_outline),
+                _buildDialogField(phoneCtrl, "Phone Number", Icons.phone_android_rounded),
+                _buildDialogField(streetCtrl, "Delivery Street Address", Icons.home_outlined),
+                _buildDialogField(cityCtrl, "City/Area", Icons.location_on_outlined),
+                const SizedBox(height: 30),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _primaryColor, 
+                    minimumSize: const Size(double.infinity, 55), 
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15))
+                  ),
+                  onPressed: isSaving ? null : () async {
+                    if (phoneCtrl.text.isEmpty || streetCtrl.text.isEmpty || nameCtrl.text.isEmpty || cityCtrl.text.isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("All fields are mandatory")));
+                      return;
+                    }
+                    setModalState(() => isSaving = true);
+                    try {
+                      await userProv.completeProfileSetup(
+                        name: nameCtrl.text.trim(), 
+                        phone: phoneCtrl.text.trim(), 
+                        street: streetCtrl.text.trim(), 
+                        city: cityCtrl.text.trim(), 
+                        state: "Lagos"
+                      );
+                      if (mounted) {
+                        Navigator.of(ctx).pop(); 
+                        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                          content: Text("Your profile is now active!"), 
+                          behavior: SnackBarBehavior.floating, 
+                          backgroundColor: Colors.green
+                        ));
+                      }
+                    } catch (e) {
+                      setModalState(() => isSaving = false);
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error: $e")));
+                    }
+                  },
+                  child: isSaving 
+                    ? const CustomLoader(size: 25)
+                    : const Text("SAVE AND CONTINUE", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                ),
+                const SizedBox(height: 25),
+              ]),
             ),
-            const SizedBox(height: 25),
-          ]),
-        ),
+          );
+        }
       ),
     );
   }
@@ -168,6 +220,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // --- VERSION & PROMO POPUPS ---
   Future<void> _checkVersion() async {
     final config = RemoteConfigService.forceUpdate;
     final packageInfo = await PackageInfo.fromPlatform();
@@ -233,13 +286,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  @override
-  void dispose() {
-    _debounce?.cancel(); 
-    _searchController.dispose();
-    super.dispose();
-  }
-
+  // --- NAVIGATION LOGIC ---
   void _onItemTapped(int index) {
     final userProvider = Provider.of<UserProvider>(context, listen: false);
     if (index > 1 && userProvider.isGuest) {
@@ -261,7 +308,7 @@ class _HomeScreenState extends State<HomeScreen> {
           Icon(Icons.lock_person_rounded, size: 60, color: _primaryColor),
           const SizedBox(height: 20),
           const Text("Identification Required", style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
-          const Text("Login to your account to save items in your bag and track deliveries.", textAlign: TextAlign.center, style: TextStyle(color: Colors.grey)),
+          const Text("Login to your account to save items and track deliveries.", textAlign: TextAlign.center, style: TextStyle(color: Colors.grey)),
           const Spacer(),
           SizedBox(
             width: double.infinity, 
@@ -296,6 +343,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // --- APP BAR & HEADER (ENHANCED SEARCH) ---
   Widget _buildGradientHeader(BuildContext context) {
     final cart = Provider.of<CartProvider>(context);
     final user = Provider.of<UserProvider>(context).appUser;
@@ -345,6 +393,17 @@ class _HomeScreenState extends State<HomeScreen> {
                     style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
                     decoration: InputDecoration(
                       prefixIcon: Icon(Icons.search_rounded, color: _primaryColor), 
+                      // --- SEARCH CANCEL BUTTON ---
+                      suffixIcon: _searchController.text.isNotEmpty 
+                          ? IconButton(
+                              icon: const Icon(Icons.cancel_rounded, color: Colors.grey), 
+                              onPressed: () {
+                                _searchController.clear();
+                                setState(() { _searchQuery = ""; });
+                                FocusScope.of(context).unfocus();
+                              },
+                            )
+                          : null,
                       border: InputBorder.none, 
                       contentPadding: const EdgeInsets.symmetric(vertical: 15),
                       filled: false, 
@@ -406,7 +465,7 @@ class _HomeScreenState extends State<HomeScreen> {
       decoration: BoxDecoration(color: Colors.white, borderRadius: const BorderRadius.vertical(top: Radius.circular(25)), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 20)]),
       child: BottomNavigationBar(
         currentIndex: _selectedIndex, onTap: _onItemTapped, type: BottomNavigationBarType.fixed, backgroundColor: Colors.transparent, elevation: 0,
-        selectedItemColor: _selectedIndex == 0 ? Colors.orange : (_selectedIndex == 1 ? Colors.blue : (_selectedIndex == 2 ? Colors.red : (_selectedIndex == 3 ? Colors.green : Colors.indigo))),
+        selectedItemColor: _primaryColor,
         unselectedItemColor: Colors.grey.shade400, showUnselectedLabels: true,
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.home_rounded), label: 'Home'),
@@ -462,7 +521,7 @@ class _HomeScreenState extends State<HomeScreen> {
         ],
         const Spacer(),
         const Divider(indent: 30, endIndent: 30),
-        const Padding(padding: EdgeInsets.only(bottom: 30), child: Column(children: [Text("08Express", style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18, color: Colors.black54)), Text("by 08Vic Enterprises © 2026", style: TextStyle(color: Colors.grey, fontSize: 11))])),
+        const Padding(padding: EdgeInsets.only(bottom: 30), child: Column(children: [Text("08Express", style: TextStyle(fontWeight: FontWeight.w900, fontSize: 18, color: Colors.black54)), Text("by 08Vic Enterprises © 2025", style: TextStyle(color: Colors.grey, fontSize: 11))])),
       ]),
     );
   }
@@ -473,7 +532,7 @@ class _HomeScreenState extends State<HomeScreen> {
 }
 
 // ==========================================
-// PAGINATED HOME CONTENT
+// PAGINATED HOME CONTENT (SEARCH & SLIDERS)
 // ==========================================
 
 class PaginatedHomeContent extends StatefulWidget {
@@ -523,6 +582,9 @@ class _PaginatedHomeContentState extends State<PaginatedHomeContent> {
     _fetchProducts();
   }
 
+  /// THE SEARCH & FEED STRATEGY:
+  /// 1. Only show products where stock > 0.
+  /// 2. Always order by createdAt descending (newest first).
   Future<void> _fetchProducts() async {
     if (_isLoading || (!_hasMore && widget.searchQuery.isEmpty)) return;
     if (mounted) setState(() { _isLoading = true; _errorMessage = null; });
@@ -531,12 +593,16 @@ class _PaginatedHomeContentState extends State<PaginatedHomeContent> {
       final collection = FirebaseFirestore.instance.collection('products');
 
       if (widget.searchQuery.trim().isNotEmpty) {
-         final QuerySnapshot snap = await collection.limit(100).get();
-         final String query = widget.searchQuery.toLowerCase();
+         // --- UPDATED SEARCH LOGIC FIXED ---
+         final QuerySnapshot snap = await collection.where('stock', isGreaterThan: 0).get();
+         final String queryText = widget.searchQuery.toLowerCase();
          final List<Product> results = snap.docs
              .map((doc) => Product.fromFirestore(doc))
-             .where((p) => p.name.toLowerCase().contains(query) || p.category.toLowerCase().contains(query))
+             .where((p) => p.name.toLowerCase().contains(queryText) || p.category.toLowerCase().contains(queryText))
              .toList();
+
+         // Sort search results: Newest arrival first
+         results.sort((a, b) => b.createdAt.compareTo(a.createdAt));
 
          if (mounted) {
            setState(() {
@@ -546,7 +612,13 @@ class _PaginatedHomeContentState extends State<PaginatedHomeContent> {
            });
          }
       } else {
-        Query query = collection.limit(_limit);
+        // --- GLOBAL FEED: Strictly In-Stock AND Newest First ---
+        Query query = collection
+            .where('stock', isGreaterThan: 0)
+            .orderBy('stock') 
+            .orderBy('createdAt', descending: true)
+            .limit(_limit);
+
         if (_lastDocument != null) {
           query = query.startAfterDocument(_lastDocument!);
         }
@@ -568,35 +640,96 @@ class _PaginatedHomeContentState extends State<PaginatedHomeContent> {
         }
       }
     } catch (e) {
-      if (mounted) setState(() => _errorMessage = "Could not fetch data.");
+      debugPrint("Firestore Error: $e");
+      if (mounted) setState(() => _errorMessage = "Error loading. Pull to refresh.");
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  Widget _buildProductWithStockCheck(Product product) {
-    bool isOutOfStock = product.stock <= 0;
-    bool isLowStock = product.stock > 0 && product.stock <= 10;
-    Widget content = ProductGridItem(key: ValueKey(product.id), product: product);
-
-    if (isOutOfStock) {
-      return AbsorbPointer(
-        child: Stack(
-          children: [
-            Opacity(opacity: 0.5, child: content),
-            Positioned.fill(
-              child: Center(
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                  decoration: BoxDecoration(color: Colors.black.withOpacity(0.6), borderRadius: BorderRadius.circular(8)),
-                  child: const Text("SOLD OUT", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+  // --- ENHANCED DYNAMIC TOP CATEGORY SLIDER ---
+  Widget _buildEnhancedCategorySlider() {
+    return Consumer<CategoryProvider>(
+      builder: (context, provider, child) {
+        if (provider.isLoading && provider.categories.isEmpty) {
+          return const SizedBox(height: 120, child: Center(child: CustomLoader(size: 30)));
+        }
+        final cats = provider.categories.where((c) => c.active).toList();
+        
+        return Container(
+          height: 155,
+          margin: const EdgeInsets.symmetric(vertical: 10),
+          child: ListView.builder(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 15),
+            physics: const BouncingScrollPhysics(),
+            itemCount: cats.length,
+            itemBuilder: (ctx, i) {
+              return TweenAnimationBuilder(
+                duration: Duration(milliseconds: 300 + (i * 100)),
+                tween: Tween<double>(begin: 0, end: 1),
+                builder: (context, double value, child) {
+                  return Transform.scale(
+                    scale: value,
+                    child: Opacity(opacity: value, child: child),
+                  );
+                },
+                child: InkWell(
+                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => ProductListingScreen(categoryName: cats[i].name))),
+                  child: Container(
+                    width: 100,
+                    margin: const EdgeInsets.only(right: 15),
+                    child: Column(
+                      children: [
+                        // Glassmorphism inspired Category Circle
+                        Container(
+                          width: 85, height: 85,
+                          padding: const EdgeInsets.all(3.5),
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            gradient: LinearGradient(
+                              colors: [Colors.orange.shade400, Colors.blue.shade900, Colors.purple.shade400], 
+                              begin: Alignment.topLeft, end: Alignment.bottomRight
+                            ),
+                            boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 10, offset: const Offset(0, 5))],
+                          ),
+                          child: Container(
+                            decoration: const BoxDecoration(shape: BoxShape.circle, color: Colors.white),
+                            child: ClipOval(
+                              child: CachedNetworkImage(
+                                imageUrl: cats[i].imageUrl, 
+                                fit: BoxFit.cover,
+                                placeholder: (c, u) => const Center(child: CustomLoader(size: 15)),
+                                errorWidget: (c, u, e) => const Icon(Icons.category_outlined, color: Colors.grey),
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          cats[i].name, 
+                          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w900), 
+                          textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
-              ),
-            ),
-          ],
-        ),
-      );
-    }
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
+
+  // NOTE: HeroMode disabled in row items to prevent "duplicate tag" crash
+  Widget _buildProductWithEnhancedCheck(Product product, {bool isHeroEnabled = true}) {
+    bool isLowStock = product.stock > 0 && product.stock <= 10;
+    Widget content = HeroMode(
+      enabled: isHeroEnabled,
+      child: ProductGridItem(key: ValueKey(product.id), product: product),
+    );
 
     if (isLowStock) {
       return Stack(
@@ -617,18 +750,26 @@ class _PaginatedHomeContentState extends State<PaginatedHomeContent> {
   }
 
   Widget _buildCategorySection(BuildContext context, String title, Color themeColor) {
-    Query q = FirebaseFirestore.instance.collection('products').where('category', isEqualTo: title).limit(10);
+    // CATEGORY QUERY: Strictly In Stock AND Newest First
+    Query q = FirebaseFirestore.instance.collection('products')
+        .where('category', isEqualTo: title)
+        .where('stock', isGreaterThan: 0)
+        .orderBy('stock')
+        .orderBy('createdAt', descending: true)
+        .limit(10);
+        
     final primaryColor = RemoteConfigService.getPrimaryColor();
 
     return FutureBuilder<QuerySnapshot>(
       future: q.get(), 
       builder: (context, snapshot) {
-        // --- SKELETON WHILE WAITING ---
         if (snapshot.connectionState == ConnectionState.waiting) {
            return _buildSectionSkeleton(primaryColor);
         }
         
-        if (!snapshot.hasData || snapshot.data!.docs.isEmpty) return const SizedBox.shrink();
+        if (snapshot.hasError || !snapshot.hasData || snapshot.data!.docs.isEmpty) {
+          return const SizedBox.shrink();
+        }
         
         var displayProducts = snapshot.data!.docs.map((d) => Product.fromFirestore(d)).toList();
 
@@ -640,9 +781,9 @@ class _PaginatedHomeContentState extends State<PaginatedHomeContent> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Row(children: [
-                    Container(width: 4, height: 18, decoration: BoxDecoration(color: themeColor, borderRadius: BorderRadius.circular(2))),
+                    Container(width: 5, height: 20, decoration: BoxDecoration(color: themeColor, borderRadius: BorderRadius.circular(2))),
                     const SizedBox(width: 8),
-                    Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+                    Text(title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900)),
                   ]),
                   InkWell(
                     onTap: () => Navigator.push(context, MaterialPageRoute(builder: (ctx) => ProductListingScreen(categoryName: title))),
@@ -661,7 +802,7 @@ class _PaginatedHomeContentState extends State<PaginatedHomeContent> {
                 itemBuilder: (ctx, i) => Container(
                   width: 165,
                   margin: const EdgeInsets.symmetric(horizontal: 6),
-                  child: _buildProductWithStockCheck(displayProducts[i]),
+                  child: _buildProductWithEnhancedCheck(displayProducts[i], isHeroEnabled: false),
                 ),
               ),
             ),
@@ -671,7 +812,6 @@ class _PaginatedHomeContentState extends State<PaginatedHomeContent> {
     );
   }
 
-  // Individual row skeleton helper
   Widget _buildSectionSkeleton(Color brandColor) {
     return Column(
       children: [
@@ -706,32 +846,20 @@ class _PaginatedHomeContentState extends State<PaginatedHomeContent> {
   Widget build(BuildContext context) {
     final brandColor = RemoteConfigService.getPrimaryColor();
 
-    // --- SEARCH MODE ---
     if (widget.searchQuery.isNotEmpty) {
-      return StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance.collection('products').snapshots(),
-        builder: (context, snapshot) {
-          if (!snapshot.hasData) return const Center(child: CustomLoader(size: 60));
-          
-          final String query = widget.searchQuery.toLowerCase();
-          final results = snapshot.data!.docs
-              .map((doc) => Product.fromFirestore(doc))
-              .where((p) => p.name.toLowerCase().contains(query) || p.category.toLowerCase().contains(query))
-              .toList();
-
-          if (results.isEmpty) return const Center(child: Padding(padding: EdgeInsets.all(40), child: Text("No products match your search.")));
-
-          return GridView.builder(
+      return RefreshIndicator(
+        onRefresh: _handleRefresh,
+        child: _products.isEmpty && _isLoading 
+        ? const Center(child: CustomLoader(size: 60))
+        : GridView.builder(
             padding: const EdgeInsets.all(16),
             gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(crossAxisCount: 2, childAspectRatio: 0.64, crossAxisSpacing: 15, mainAxisSpacing: 15),
-            itemCount: results.length,
-            itemBuilder: (ctx, i) => _buildProductWithStockCheck(results[i]),
-          );
-        },
+            itemCount: _products.length,
+            itemBuilder: (ctx, i) => _buildProductWithEnhancedCheck(_products[i]),
+          ),
       );
     }
 
-    // --- NORMAL MODE ---
     return RefreshIndicator(
       onRefresh: _handleRefresh,
       color: Colors.orange,
@@ -742,6 +870,10 @@ class _PaginatedHomeContentState extends State<PaginatedHomeContent> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            // --- TOP MODERN CATEGORY SLIDER ---
+            _buildEnhancedCategorySlider(),
+
+            // ALL CATEGORY SECTIONS
             _buildCategorySection(context, "Food & Beverages", Colors.orange.shade800),
             _buildCategorySection(context, "Nestle", Colors.blue.shade800),
             _buildCategorySection(context, "Household & Cleaning", Colors.teal.shade700),
@@ -751,15 +883,18 @@ class _PaginatedHomeContentState extends State<PaginatedHomeContent> {
             _buildCategorySection(context, "Children Foods", Colors.pink.shade800),
             
             const Divider(height: 40, thickness: 8, color: Color(0xFFF2F2F2)),
+            
+            // FEED HEADER
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               child: Row(children: [
-                const Icon(Icons.flash_on_rounded, color: Colors.amber, size: 22),
+                const Icon(Icons.auto_awesome, color: Colors.amber, size: 22),
                 const SizedBox(width: 8),
-                Text("Daily Deals", style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: Colors.grey.shade800)),
+                Text("Recently Added", style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: Colors.grey.shade800)),
               ]),
             ),
             
+            // PAGINATED GRID
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: GridView.builder(
@@ -769,7 +904,7 @@ class _PaginatedHomeContentState extends State<PaginatedHomeContent> {
                   crossAxisCount: 2, childAspectRatio: 0.64, crossAxisSpacing: 12, mainAxisSpacing: 12
                 ),
                 itemCount: _products.length,
-                itemBuilder: (ctx, i) => _buildProductWithStockCheck(_products[i]),
+                itemBuilder: (ctx, i) => _buildProductWithEnhancedCheck(_products[i]),
               ),
             ),
 
@@ -840,7 +975,7 @@ class _RotatingSearchHintState extends State<RotatingSearchHint> {
     return AnimatedSwitcher(
       duration: const Duration(milliseconds: 600),
       child: Text(
-        _suggestions.isNotEmpty ? _suggestions[_currentIndex] : "Find products...",
+        _suggestions[_currentIndex],
         key: ValueKey(_currentIndex),
         style: const TextStyle(color: Colors.black26, fontSize: 14),
       ),
@@ -864,7 +999,6 @@ class _AnimatedGradientBorderState extends State<AnimatedGradientBorder> with Si
   Widget build(BuildContext context) { return AnimatedBuilder(animation: _c, builder: (_, __) => Container(padding: const EdgeInsets.all(1.5), decoration: BoxDecoration(borderRadius: BorderRadius.circular(15), gradient: SweepGradient(colors: const [Color(0xFFFE7F2D), Colors.blue, Colors.purple, Color(0xFFFE7F2D)], transform: GradientRotation(_c.value * 2 * pi))), child: Container(decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14)), child: widget.child))); }
 }
 
-// --- FULL PAGE SKELETON ---
 class FullHomeSkeleton extends StatelessWidget {
   final Color brandColor;
   const FullHomeSkeleton({super.key, required this.brandColor});
@@ -875,6 +1009,7 @@ class FullHomeSkeleton extends StatelessWidget {
       physics: const NeverScrollableScrollPhysics(),
       child: Column(
         children: [
+          const SizedBox(height: 140),
           _skeletonRow(),
           _skeletonRow(),
           const Divider(height: 40, thickness: 8, color: Color(0xFFF2F2F2)),
@@ -926,7 +1061,6 @@ class FullHomeSkeleton extends StatelessWidget {
   }
 }
 
-// --- PRODUCT CARD SKELETON ---
 class ProductSkeletonItem extends StatelessWidget {
   final Color brandColor;
   const ProductSkeletonItem({super.key, required this.brandColor});

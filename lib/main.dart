@@ -7,23 +7,31 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:firebase_ui_auth/firebase_ui_auth.dart' as auth_ui;
 import 'package:cloud_firestore/cloud_firestore.dart'; 
 import 'package:firebase_auth/firebase_auth.dart'; 
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:firebase_remote_config/firebase_remote_config.dart';
+import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 
+// Firebase Config
 import 'package:eight_express/firebase_options.dart';
+
+// Providers
 import 'package:eight_express/providers/user_provider.dart';
 import 'package:eight_express/providers/cart_provider.dart';
 import 'package:eight_express/providers/category_provider.dart';
 import 'package:eight_express/providers/product_provider.dart';
-import 'package:eight_express/services/order_service.dart';
 
-import 'package:eight_express/screens/auth_screen.dart';
-import 'package:eight_express/screens/home_screen.dart';
-import 'package:eight_express/widgets/auth_wrapper.dart';
-import 'package:eight_express/screens/maintenance_screen.dart';
-import 'package:firebase_remote_config/firebase_remote_config.dart';
-import 'package:firebase_crashlytics/firebase_crashlytics.dart';
+// Services
+import 'package:eight_express/services/order_service.dart';
 import 'package:eight_express/services/notification_service.dart';
 
-// Global navigation key
+// Screens
+import 'package:eight_express/screens/splash_screen.dart';
+import 'package:eight_express/screens/onboarding_screen.dart';
+import 'package:eight_express/screens/auth_screen.dart';
+import 'package:eight_express/screens/home_screen.dart';
+import 'package:eight_express/screens/maintenance_screen.dart';
+
+// Global navigation key for notification handling
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin = FlutterLocalNotificationsPlugin();
 
@@ -38,7 +46,6 @@ const AndroidNotificationChannel channel = AndroidNotificationChannel(
 @pragma('vm:entry-point')
 Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-
   if (message.notification != null) {
     await NotificationService().saveNotification(
       title: message.notification!.title ?? "New Notification",
@@ -48,56 +55,69 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   }
 }
 
+// ==========================================
+// MAIN ENTRY POINT
+// ==========================================
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // 1. Initialize Firebase
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
-  // --- 1. CONFIGURE AUTH PROVIDERS ---
-  auth_ui.FirebaseUIAuth.configureProviders([
-    auth_ui.EmailAuthProvider(),
-    auth_ui.PhoneAuthProvider(),
-  ]);
+  // 2. BOOTSTRAP: Load SharedPreferences BEFORE the app runs
+  // This prevents the onboarding screen from "getting stuck" in a loop
+  final prefs = await SharedPreferences.getInstance();
+  final bool isFirstTime = prefs.getBool('isFirstTime') ?? true;
 
-  // --- 2. REMOTE CONFIG ---
+  // 3. Crashlytics
+  FlutterError.onError = FirebaseCrashlytics.instance.recordFlutterFatalError;
+
+  // 4. Remote Config with TIMEOUT
   final remoteConfig = FirebaseRemoteConfig.instance;
   await remoteConfig.setConfigSettings(RemoteConfigSettings(
     fetchTimeout: const Duration(seconds: 10),
-    minimumFetchInterval: const Duration(seconds: 0),
+    minimumFetchInterval: const Duration(hours: 1),
   ));
 
   try {
-    await remoteConfig.fetchAndActivate();
+    await remoteConfig.fetchAndActivate().timeout(const Duration(seconds: 12));
   } catch (e) {
-    debugPrint("Remote Config Fetch Failed: $e");
+    debugPrint("Remote Config initialization timed out: $e");
   }
 
-  // Maintenance Check
+  // 5. Maintenance Mode Check
   if (remoteConfig.getBool('is_under_maintenance')) {
-    runApp(const MaterialApp(home: MaintenanceScreen(), debugShowCheckedModeBanner: false));
+    runApp(MaterialApp(
+      debugShowCheckedModeBanner: false,
+      theme: ThemeData(useMaterial3: true),
+      home: const MaintenanceScreen(),
+    ));
     return;
   }
 
-  // --- 3. CRASHLYTICS ---
-  FlutterError.onError = FirebaseCrashlytics.instance.recordFlutterFatalError;
-
-  // --- 4. MESSAGING ---
+  // 6. Messaging & Notifications
   FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
-
   await flutterLocalNotificationsPlugin
       .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
       ?.createNotificationChannel(channel);
 
   await FirebaseMessaging.instance.setForegroundNotificationPresentationOptions(
-    alert: true, 
-    badge: true, 
-    sound: true,
+    alert: true, badge: true, sound: true,
   );
 
-  runApp(const MyApp());
+  // 7. Auth UI Config
+  auth_ui.FirebaseUIAuth.configureProviders([
+    auth_ui.EmailAuthProvider(),
+    auth_ui.PhoneAuthProvider(),
+  ]);
+
+  runApp(MyApp(isFirstTime: isFirstTime));
 }
 
 class MyApp extends StatefulWidget {
-  const MyApp({super.key});
+  final bool isFirstTime;
+  const MyApp({super.key, required this.isFirstTime});
+
   @override
   State<MyApp> createState() => _MyAppState();
 }
@@ -114,14 +134,8 @@ class _MyAppState extends State<MyApp> {
     await messaging.requestPermission(alert: true, badge: true, sound: true);
     await messaging.subscribeToTopic('all_users');
 
-    if (FirebaseAuth.instance.currentUser != null) {
-      _saveDeviceToken();
-    }
-
     FirebaseAuth.instance.authStateChanges().listen((User? user) {
-      if (user != null) {
-        _saveDeviceToken();
-      }
+      if (user != null) _saveDeviceToken();
     });
 
     const androidInit = AndroidInitializationSettings('@mipmap/launcher_icon');
@@ -146,13 +160,7 @@ class _MyAppState extends State<MyApp> {
           notification.title, 
           notification.body,
           NotificationDetails(
-            android: AndroidNotificationDetails(
-              channel.id, 
-              channel.name, 
-              priority: Priority.high, 
-              importance: Importance.max, 
-              icon: '@mipmap/launcher_icon'
-            )
+            android: AndroidNotificationDetails(channel.id, channel.name, icon: '@mipmap/launcher_icon')
           ),
           payload: message.data['screen'],
         );
@@ -177,12 +185,8 @@ class _MyAppState extends State<MyApp> {
 
   void _handleNav(String? screen) {
     if (screen == null || navigatorKey.currentState == null) return;
-    
-    String route = '/home';
-    if (screen == 'my_orders') route = '/my_orders';
-    if (screen == 'categories') route = '/categories';
-    
-    navigatorKey.currentState?.pushNamed(route);
+    if (screen == 'my_orders') navigatorKey.currentState?.pushNamed('/my_orders');
+    if (screen == 'categories') navigatorKey.currentState?.pushNamed('/categories');
   }
 
   @override
@@ -191,19 +195,12 @@ class _MyAppState extends State<MyApp> {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => UserProvider()),
-        
-        // --- UPDATED: CartProvider now listens to UserProvider ---
         ChangeNotifierProxyProvider<UserProvider, CartProvider>(
           create: (_) => CartProvider(),
-          update: (_, userProv, cartProv) {
-            // When user changes (logs in/out), update the CartProvider's UID
-            return cartProv!..setUserId(userProv.appUser?.uid);
-          },
+          update: (_, userProv, cartProv) => cartProv!..setUserId(userProv.appUser?.uid),
         ),
-
         ChangeNotifierProvider(create: (_) => CategoryProvider()),
         ChangeNotifierProvider(create: (_) => ProductProvider()),
-        
         ChangeNotifierProxyProvider2<UserProvider, CartProvider, OrderService>(
           create: (context) => OrderService(
             Provider.of<UserProvider>(context, listen: false), 
@@ -232,13 +229,71 @@ class _MyAppState extends State<MyApp> {
             ),
           ),
         ),
-        home: const AuthWrapper(),
+        // Pass the pre-loaded isFirstTime into the Gatekeeper
+        home: RootGatekeeper(isFirstTime: widget.isFirstTime),
         routes: {
           '/home': (context) => const HomeScreen(),
-          // '/categories': (context) => const CategoriesScreen(),
-          // '/my_orders': (context) => const MyOrdersScreen(),
+          '/auth': (context) => const AuthScreen(),
         },
       ),
+    );
+  }
+}
+
+// ==========================================
+// PROFESSIONAL GATEKEEPER (FIXED)
+// ==========================================
+class RootGatekeeper extends StatefulWidget {
+  final bool isFirstTime;
+  const RootGatekeeper({super.key, required this.isFirstTime});
+
+  @override
+  State<RootGatekeeper> createState() => _RootGatekeeperState();
+}
+
+class _RootGatekeeperState extends State<RootGatekeeper> {
+  bool _isSplashFinished = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Start splash timer immediately
+    Timer(const Duration(seconds: 4), () {
+      if (mounted) setState(() => _isSplashFinished = true);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Stage 1: Always show splash first
+    if (!_isSplashFinished) return const SplashScreen();
+
+    // Stage 2: We use the pre-loaded boolean from main()
+    // We check the Provider to see if onboarding was JUST completed
+    return Consumer<UserProvider>(
+      builder: (context, userProv, _) {
+        // If they are brand new and haven't clicked 'Explore' yet
+        if (widget.isFirstTime && !userProv.isIntroCompleted) {
+          return const OnboardingScreen();
+        }
+
+        // Stage 3: Returning user or Onboarding just finished -> Check Auth
+        return StreamBuilder<User?>(
+          stream: FirebaseAuth.instance.authStateChanges(),
+          builder: (context, authSnapshot) {
+            // While connecting to the auth stream, keep a nice white background or splash
+            if (authSnapshot.connectionState == ConnectionState.waiting) {
+              return const Scaffold(backgroundColor: Colors.white, body: Center(child: SplashScreen()));
+            }
+
+            // User is logged in -> Go Home
+            if (authSnapshot.hasData) return const HomeScreen();
+
+            // User is logged out -> Go to Auth/Login Screen
+            return const AuthScreen();
+          },
+        );
+      },
     );
   }
 }

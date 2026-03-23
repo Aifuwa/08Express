@@ -1,5 +1,7 @@
 // lib/screens/checkout_screen.dart
 import 'dart:math';
+import 'dart:ui';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:io';
@@ -13,7 +15,6 @@ import 'package:logger/logger.dart';
 
 import 'package:eight_express/providers/cart_provider.dart';
 import 'package:eight_express/providers/user_provider.dart';
-import 'package:eight_express/screens/home_screen.dart';
 import 'package:eight_express/screens/user_addresses_screen.dart';
 import 'package:eight_express/models/app_user.dart';
 import 'package:eight_express/widgets/custom_loader.dart';
@@ -33,557 +34,385 @@ class CheckoutScreen extends StatefulWidget {
   State<CheckoutScreen> createState() => _CheckoutScreenState();
 }
 
-class _CheckoutScreenState extends State<CheckoutScreen> {
+class _CheckoutScreenState extends State<CheckoutScreen> with TickerProviderStateMixin {
   File? _pickedReceiptImage;
   bool _isUploading = false;
   String? _uploadMessage;
 
-  DeliveryMethod _selectedDeliveryMethod = DeliveryMethod.pickup;
+  DeliveryMethod? _selectedDeliveryMethod;
   UserAddress? _selectedUserAddress;
+  Map<String, dynamic>? _selectedLocation;
   
-  final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
+  // Dynamic Locations from Remote Config
+  List<Map<String, dynamic>> _remoteLocations = [];
 
   @override
   void initState() {
     super.initState();
+    _initRemoteConfigData();
+    _loadInitialAddress();
+  }
+
+  // --- STEP 1: INITIALIZE DYNAMIC DATA ---
+  void _initRemoteConfigData() {
+    try {
+      final String jsonStr = RemoteConfigService.getRegionsJson();
+      if (jsonStr.isNotEmpty) {
+        final List<dynamic> decoded = json.decode(jsonStr);
+        setState(() {
+          _remoteLocations = decoded.map((e) => Map<String, dynamic>.from(e)).toList();
+        });
+      }
+    } catch (e) {
+      _logger.e("Error parsing Remote Config: $e");
+      // Safety Fallback
+      _remoteLocations = [
+        {'name': 'Ring Road / Oba Palace Area', 'fee': 3000.0},
+        {'name': 'GRA / Airport Road', 'fee': 3000.0},
+      ];
+    }
+  }
+
+  void _loadInitialAddress() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      final userProvider = Provider.of<UserProvider>(context, listen: false);
-      final addresses = userProvider.appUser?.addresses ?? [];
-      
+      final userProv = Provider.of<UserProvider>(context, listen: false);
+      final addresses = userProv.appUser?.addresses ?? [];
       if (addresses.isNotEmpty) {
-        try {
-          final defaultAddr = addresses.firstWhere(
-            (a) => a.isDefault, 
-            orElse: () => addresses.first
-          );
-          setState(() {
-            _selectedUserAddress = defaultAddr;
-          });
-        } catch (e) {
-          setState(() {
-            _selectedUserAddress = null;
-          });
-        }
+        setState(() {
+          _selectedUserAddress = addresses.firstWhere((a) => a.isDefault, orElse: () => addresses.first);
+        });
       }
     });
   }
 
+  double _getDeliveryFee() => _selectedDeliveryMethod == DeliveryMethod.delivery ? (_selectedLocation?['fee'] ?? 0.0) : 0.0;
+
   String _getDeliveryEstimate() {
-    DateTime orderDate = DateTime.now();
-    DateTime start = orderDate.add(const Duration(days: 1));
-    DateTime end = orderDate.add(const Duration(days: 3));
     final DateFormat formatter = DateFormat('MMM d');
-    return "${formatter.format(start)} - ${formatter.format(end)}";
+    return "${formatter.format(DateTime.now().add(const Duration(days: 1)))} - ${formatter.format(DateTime.now().add(const Duration(days: 3)))}";
   }
 
   void _copyToClipboard(String text, String label) {
     Clipboard.setData(ClipboardData(text: text));
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(
-          children: [
-            const Icon(Icons.check_circle, color: Colors.white, size: 20),
-            const SizedBox(width: 10),
-            Text('$label copied!'),
-          ],
-        ),
-        backgroundColor: Colors.green[700],
-        behavior: SnackBarBehavior.floating,
-        duration: const Duration(seconds: 2),
-      ),
-    );
+    HapticFeedback.mediumImpact();
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Row(children: [const Icon(Icons.check_circle, color: Colors.white), const SizedBox(width: 10), Text('$label copied to clipboard!')]),
+      behavior: SnackBarBehavior.floating,
+      backgroundColor: Colors.blueAccent.shade700,
+      margin: const EdgeInsets.all(20),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+    ));
   }
 
   Future<void> _pickImage() async {
-    final picker = ImagePicker();
-    final pickedFile = await picker.pickImage(source: ImageSource.gallery, imageQuality: 70);
-
-    if (mounted) {
+    final pickedFile = await ImagePicker().pickImage(source: ImageSource.gallery, imageQuality: 70);
+    if (mounted && pickedFile != null) {
       setState(() {
-        if (pickedFile != null) {
-          _pickedReceiptImage = File(pickedFile.path);
-          _uploadMessage = null;
-        }
+        _pickedReceiptImage = File(pickedFile.path);
+        _uploadMessage = null;
       });
     }
   }
 
-  int _getTotalItemCount(CartProvider cart) {
-    int totalCount = 0;
-    cart.items.forEach((key, item) {
-      totalCount += item.quantity;
-    });
-    return totalCount;
-  }
-
-  double _calculateDeliveryFee(CartProvider cart) {
-    if (_selectedDeliveryMethod == DeliveryMethod.pickup) return 0.0;
-    
-    final config = RemoteConfigService.delivery;
-    int totalItems = _getTotalItemCount(cart);
-    int threshold = config['threshold_items'] ?? 50;
-    double standard = (config['standard_fee'] ?? 3000).toDouble();
-    double large = (config['large_fee'] ?? 5000).toDouble();
-
-    return totalItems <= threshold ? standard : large;
-  }
-
-  // --- UPDATED ORDER LOGIC WITH STOCK DEDUCTION ---
+  // --- STEP 2: PROFESSIONAL ORDER LOGIC (READ-BEFORE-WRITE) ---
   Future<void> _placeOrder() async {
     final cartProvider = Provider.of<CartProvider>(context, listen: false);
-
     if (cartProvider.items.isEmpty) return;
     
-    // 1. Validations
-    if (_selectedDeliveryMethod == DeliveryMethod.delivery && _selectedUserAddress == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select a delivery address'), backgroundColor: Colors.red),
-      );
-      return;
+    // Validations
+    if (_selectedDeliveryMethod == null) return _showError('Please select a Logistics method');
+    if (_selectedDeliveryMethod == DeliveryMethod.delivery) {
+      if (_selectedLocation == null) return _showError('Please choose your region');
+      if (_selectedUserAddress == null) return _showError('Shipping address is required');
     }
-
-    final User? currentUser = FirebaseAuth.instance.currentUser;
-    if (currentUser == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please log in first.')));
-      return;
-    }
-
-    if (_pickedReceiptImage == null) {
-      setState(() => _uploadMessage = '⚠ Please attach your payment receipt.');
-      return;
-    }
+    if (_pickedReceiptImage == null) return _showError('Payment proof (screenshot) is mandatory');
 
     setState(() => _isUploading = true);
 
     try {
-      // 2. Upload Receipt to Storage
-      final String fileName = 'receipts/${DateTime.now().millisecondsSinceEpoch}_${_pickedReceiptImage!.path.split('/').last}';
+      // 1. Upload to Storage
+      final String fileName = 'receipts/${DateTime.now().millisecondsSinceEpoch}.jpg';
       final Reference storageRef = FirebaseStorage.instance.ref().child(fileName);
-      final UploadTask uploadTask = storageRef.putFile(_pickedReceiptImage!);
-      final TaskSnapshot snapshot = await uploadTask;
-      final String receiptImageUrl = await snapshot.ref.getDownloadURL();
+      await storageRef.putFile(_pickedReceiptImage!);
+      final String receiptUrl = await storageRef.getDownloadURL();
 
-      if (!mounted) return;
-
-      // 3. Prepare Order Data
-      final double deliveryFee = _calculateDeliveryFee(cartProvider);
-      final double grandTotal = widget.totalAmount + deliveryFee;
-      final String method = _selectedDeliveryMethod.toString().split('.').last;
-
-      String shippingAddress;
-      if (_selectedDeliveryMethod == DeliveryMethod.pickup) {
-        shippingAddress = "STORE PICKUP: #08Vic Enterprise HQ";
-      } else {
-        final addr = _selectedUserAddress!;
-        shippingAddress = "${addr.street}, ${addr.city}, ${addr.state} ${addr.zipCode}, ${addr.country}";
-      }
-
-      final orderItems = cartProvider.items.values.map((cartItem) => {
-        'productId': cartItem.productId,
-        'productName': cartItem.name,
-        'price': cartItem.price,
-        'quantity': cartItem.quantity,
-        'imageUrl': cartItem.imageUrl,
-      }).toList();
-
-      // 4. RUN TRANSACTION: Deduct Stock AND Create Order atomically
+      // 2. Transaction (Atomic Stock Management)
       await FirebaseFirestore.instance.runTransaction((transaction) async {
-        // Step A: Verify Stock Availability for ALL items
-        for (var cartItem in cartProvider.items.values) {
-          DocumentReference productRef = FirebaseFirestore.instance.collection('products').doc(cartItem.productId);
-          DocumentSnapshot productSnapshot = await transaction.get(productRef);
+        List<Map<String, dynamic>> stockUpdates = [];
 
-          if (!productSnapshot.exists) {
-            throw Exception("Product '${cartItem.name}' no longer exists.");
-          }
+        // PHASE 1: ALL READS
+        for (var i in cartProvider.items.values) {
+          DocumentReference pRef = FirebaseFirestore.instance.collection('products').doc(i.productId);
+          DocumentSnapshot pSnap = await transaction.get(pRef);
+          if (!pSnap.exists) throw Exception("Product '${i.name}' no longer exists.");
+          
+          int currentStock = pSnap.get('stock') ?? 0;
+          if (currentStock < i.quantity) throw Exception("Only $currentStock items left for ${i.name}");
 
-          int currentStock = productSnapshot.get('stock') ?? 0;
-          if (currentStock < cartItem.quantity) {
-             throw Exception("Stock Issue: '${cartItem.name}' only has $currentStock left.");
-          }
-
-          // Step B: Deduct Stock
-          transaction.update(productRef, {
-            'stock': currentStock - cartItem.quantity,
-          });
+          stockUpdates.add({'ref': pRef, 'newStock': currentStock - i.quantity});
         }
 
-        // Step C: Create Order Document
-        DocumentReference orderRef = FirebaseFirestore.instance.collection('orders').doc();
-        transaction.set(orderRef, {
-          'userId': currentUser.uid,
+        // PHASE 2: ALL WRITES
+        for (var u in stockUpdates) {
+          transaction.update(u['ref'] as DocumentReference, {'stock': u['newStock']});
+        }
+
+        final double fee = _getDeliveryFee();
+        final String methodStr = _selectedDeliveryMethod.toString().split('.').last;
+
+        transaction.set(FirebaseFirestore.instance.collection('orders').doc(), {
+          'userId': FirebaseAuth.instance.currentUser?.uid,
           'status': 'pending_receipt_verification',
           'orderDate': Timestamp.now(),
           'subtotal': widget.totalAmount,
-          'deliveryFee': deliveryFee,
-          'totalAmount': grandTotal,
-          'deliveryMethod': method,
-          'shippingAddress': shippingAddress,
-          'receiptImageUrl': receiptImageUrl,
-          'orderItems': orderItems,
-          'trackingMilestones': method == 'pickup' 
-              ? ['Order Placed', 'Payment Verified', 'Processing', 'Ready for Pickup', 'Collected']
-              : ['Order Placed', 'Payment Verified', 'Processing', 'In Transit', 'Delivered'],
-          'currentStep': 0, 
+          'deliveryFee': fee,
+          'totalAmount': widget.totalAmount + fee,
+          'deliveryMethod': methodStr,
+          'shippingAddress': methodStr == 'pickup' 
+              ? "STORE PICKUP: HQ" 
+              : "${_selectedUserAddress!.street}, ${_selectedUserAddress!.city} (${_selectedLocation!['name']})",
+          'receiptImageUrl': receiptUrl,
+          'orderItems': cartProvider.items.values.map((e) => {
+            'productId': e.productId, 'productName': e.name, 'price': e.price, 'quantity': e.quantity, 'imageUrl': e.imageUrl
+          }).toList(),
+          'currentStep': 0,
           'estimatedCompletion': _getDeliveryEstimate(),
         });
       });
 
-      // 5. Success
       cartProvider.clearCart();
-
-      if (mounted) {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (ctx) => const OrderSuccessScreen()),
-        );
-      }
-
+      if (mounted) Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const OrderSuccessScreen()));
     } catch (e) {
-      _logger.e(e);
-      String errorMsg = 'Failed to place order. Please try again.';
-
-      // Display friendly stock error
-      if (e.toString().contains("Stock Issue")) {
-        errorMsg = e.toString().replaceAll("Exception: ", "");
-      }
-
-      if (mounted) {
-        setState(() => _uploadMessage = errorMsg);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(errorMsg), backgroundColor: Colors.red, duration: const Duration(seconds: 4)),
-        );
-      }
+      _showError(e.toString().replaceAll("Exception: ", ""));
     } finally {
       if (mounted) setState(() => _isUploading = false);
     }
   }
 
+  void _showError(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg), backgroundColor: Colors.redAccent, behavior: SnackBarBehavior.floating));
+  }
+
+  void _showRegionPicker() {
+    showModalBottomSheet(
+      context: context, isScrollControlled: true, backgroundColor: Colors.transparent,
+      builder: (ctx) => _ModernRegionPicker(locations: _remoteLocations, onSelected: (loc) => setState(() => _selectedLocation = loc)),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final cart = Provider.of<CartProvider>(context);
-    final userProvider = Provider.of<UserProvider>(context);
-    final List<UserAddress> userAddresses = userProvider.appUser?.addresses ?? [];
-
-    final double deliveryFee = _calculateDeliveryFee(cart);
-    final double grandTotal = widget.totalAmount + deliveryFee;
-    final String deliveryText = _getDeliveryEstimate();
-    
+    final primaryColor = RemoteConfigService.getPrimaryColor();
+    final userProv = Provider.of<UserProvider>(context);
+    final List<UserAddress> addresses = userProv.appUser?.addresses ?? [];
     final bank = RemoteConfigService.bank;
 
     return Scaffold(
-      backgroundColor: Colors.grey[100],
+      backgroundColor: const Color(0xFFF8FAFC),
+      extendBodyBehindAppBar: true,
       appBar: AppBar(
-        title: const Text("Checkout", style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
-        backgroundColor: Colors.white,
-        elevation: 0,
-        centerTitle: true,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new, color: Colors.black, size: 20),
-          onPressed: () => Navigator.pop(context),
-        ),
+        title: const Text("Order Checkout", style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+        backgroundColor: Colors.white.withOpacity(0.8), elevation: 0, centerTitle: true,
+        flexibleSpace: ClipRect(child: BackdropFilter(filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10), child: Container(color: Colors.transparent))),
+        leading: IconButton(icon: const Icon(Icons.arrow_back_ios_new, color: Colors.black), onPressed: () => Navigator.pop(context)),
       ),
       body: SingleChildScrollView(
-        child: Form(
-          key: _formKey,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 15.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                
-                const SectionTitle(title: "1. Delivery Method"),
-                Container(
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(16),
-                    boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4))],
-                    border: Border.all(color: Colors.grey.shade200),
-                  ),
-                  child: Column(
-                    children: [
-                      _buildModernRadioTile(
-                        value: DeliveryMethod.pickup,
-                        title: 'Store Pickup',
-                        subtitle: 'Ready in 24-72 hours',
-                        icon: Icons.storefront_rounded,
+        child: Column(children: [
+          const SizedBox(height: 110),
+          _buildStepper(primaryColor),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              const SectionHeader(title: "Step 1: Choose Logistics"),
+              Row(children: [
+                _MethodCard(title: "Pickup", subtitle: "Free", icon: Icons.storefront_outlined, isSelected: _selectedDeliveryMethod == DeliveryMethod.pickup, onTap: () => setState(() { _selectedDeliveryMethod = DeliveryMethod.pickup; _selectedLocation = null; }), color: primaryColor),
+                const SizedBox(width: 15),
+                _MethodCard(title: "Delivery", subtitle: "Benin City", icon: Icons.local_shipping_outlined, isSelected: _selectedDeliveryMethod == DeliveryMethod.delivery, onTap: () => setState(() => _selectedDeliveryMethod = DeliveryMethod.delivery), color: primaryColor),
+              ]),
+
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 300),
+                child: _selectedDeliveryMethod == DeliveryMethod.delivery 
+                  ? Column(children: [
+                      const SizedBox(height: 25),
+                      const SectionHeader(title: "Step 2: Region & Address"),
+                      GestureDetector(
+                        onTap: _showRegionPicker,
+                        child: _ModernInputBox(icon: Icons.map_outlined, text: _selectedLocation?['name'] ?? "Select Region", isSelected: _selectedLocation != null, color: primaryColor),
                       ),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        child: Divider(height: 1, color: Colors.grey[200]),
+                      const SizedBox(height: 15),
+                      _AddressSelectorCard(
+                        selectedAddress: _selectedUserAddress,
+                        addresses: addresses,
+                        primaryColor: primaryColor,
+                        onRefresh: () => setState(() {}),
                       ),
-                      _buildModernRadioTile(
-                        value: DeliveryMethod.delivery,
-                        title: 'Door Delivery',
-                        subtitle: 'Est. $deliveryText',
-                        icon: Icons.local_shipping_rounded,
-                        fee: deliveryFee,
-                      ),
-                    ],
-                  ),
-                ),
-
-                if (_selectedDeliveryMethod == DeliveryMethod.delivery) ...[
-                  const SizedBox(height: 25),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const SectionTitle(title: "Shipping Address", bottomPadding: 0),
-                      TextButton(
-                        onPressed: () {
-                          Navigator.push(context, MaterialPageRoute(builder: (_) => const UserAddressesScreen()));
-                        },
-                        child: Text("Manage", style: TextStyle(fontWeight: FontWeight.bold, color: Theme.of(context).primaryColor)),
-                      )
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: Colors.grey.shade300),
-                    ),
-                    child: userAddresses.isEmpty
-                      ? Center(
-                          child: TextButton.icon(
-                            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const UserAddressesScreen())),
-                            icon: const Icon(Icons.add_location_alt_outlined),
-                            label: const Text("Add New Address"),
-                          ),
-                        )
-                      : DropdownButtonHideUnderline(
-                          child: DropdownButton<UserAddress>(
-                            isExpanded: true,
-                            value: userAddresses.contains(_selectedUserAddress) ? _selectedUserAddress : null,
-                            hint: const Text("Select address"),
-                            onChanged: (UserAddress? newValue) => setState(() => _selectedUserAddress = newValue),
-                            items: userAddresses.map((addr) => DropdownMenuItem(
-                              value: addr,
-                              child: Text("${addr.street}, ${addr.city}", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                            )).toList(),
-                          ),
-                        ),
-                  ),
-                ],
-
-                const SizedBox(height: 30),
-                const SectionTitle(title: "Order Summary"),
-                Container(
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(16),
-                    boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10)],
-                    border: Border.all(color: Colors.grey.shade200),
-                  ),
-                  child: Column(
-                    children: [
-                      _buildSummaryRow('Subtotal', widget.totalAmount),
-                      const SizedBox(height: 10),
-                      _buildSummaryRow('Delivery Fee', deliveryFee, isHighlighted: true),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 15),
-                        child: Divider(height: 1, thickness: 1, color: Colors.grey[200]),
-                      ),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          const Text('TOTAL PAYABLE', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.black54)),
-                          Text('₦${grandTotal.toStringAsFixed(2)}', 
-                            style: TextStyle(fontWeight: FontWeight.w900, fontSize: 22, color: Theme.of(context).primaryColor)
-                          ),
-                        ],
-                      )
-                    ],
-                  ),
-                ),
-
-                const SizedBox(height: 30),
-                const StepHeader(number: "1", title: "Make Bank Transfer"),
-                const SizedBox(height: 10),
-                
-                BankDetailsCard(
-                  bankName: bank['bank_name'] ?? 'Moniepoint',
-                  accountNumber: bank['account_number'] ?? '5449707683',
-                  accountName: bank['account_name'] ?? '#08Vic Enterprise',
-                  onCopy: _copyToClipboard,
-                ),
-
-                const SizedBox(height: 25),
-                const StepHeader(number: "2", title: "Upload Receipt"),
-                const SizedBox(height: 10),
-                
-                GestureDetector(
-                  onTap: _pickImage,
-                  child: Container(
-                    height: 150,
-                    width: double.infinity,
-                    decoration: BoxDecoration(
-                      color: _pickedReceiptImage != null ? Colors.white : const Color(0xFFF0F4F8),
-                      borderRadius: BorderRadius.circular(16),
-                      image: _pickedReceiptImage != null 
-                          ? DecorationImage(image: FileImage(_pickedReceiptImage!), fit: BoxFit.cover)
-                          : null
-                    ),
-                    child: _pickedReceiptImage == null 
-                      ? Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(Icons.upload_file, color: Theme.of(context).primaryColor, size: 28),
-                            const SizedBox(height: 12),
-                            Text('Tap to upload Screenshot', style: TextStyle(color: Theme.of(context).primaryColor, fontWeight: FontWeight.bold)),
-                          ],
-                        )
-                      : null,
-                  ),
-                ),
-                
-                if (_uploadMessage != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 10),
-                    child: Center(
-                      child: Text(_uploadMessage!, style: const TextStyle(color: Colors.orange, fontWeight: FontWeight.bold)),
-                    ),
-                  ),
-
-                const SizedBox(height: 40),
-
-                SizedBox(
-                  width: double.infinity,
-                  height: 55,
-                  child: ElevatedButton(
-                    onPressed: _isUploading ? null : _placeOrder,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Theme.of(context).primaryColor,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                    ),
-                    child: _isUploading
-                        ? const CustomLoader(size: 40) 
-                        : const Text('CONFIRM PAYMENT', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
-                  ),
-                ),
-                const SizedBox(height: 50),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildModernRadioTile({
-    required DeliveryMethod value,
-    required String title,
-    required String subtitle,
-    required IconData icon,
-    double? fee,
-  }) {
-    final bool isSelected = _selectedDeliveryMethod == value;
-    return InkWell(
-      onTap: () => setState(() => _selectedDeliveryMethod = value),
-      child: Container(
-        padding: const EdgeInsets.all(16.0),
-        child: Row(
-          children: [
-            Icon(icon, color: isSelected ? Theme.of(context).primaryColor : Colors.grey, size: 24),
-            const SizedBox(width: 15),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                  Text(subtitle, style: const TextStyle(fontSize: 12, color: Colors.grey)),
-                ],
+                    ])
+                  : const SizedBox.shrink(),
               ),
-            ),
-            Icon(isSelected ? Icons.check_circle : Icons.circle_outlined, color: isSelected ? Theme.of(context).primaryColor : Colors.grey[300])
-          ],
-        ),
+
+              const SizedBox(height: 30),
+              const SectionHeader(title: "Step 3: Transfer Payment"),
+              _ModernBankCard(bankName: bank['bank_name'] ?? 'Moniepoint', accountNumber: bank['account_number'] ?? '5449707683', accountName: bank['account_name'] ?? '#08Vic Enterprise', onCopy: _copyToClipboard),
+              
+              const SizedBox(height: 30),
+              const SectionHeader(title: "Step 4: Upload Proof"),
+              _buildImagePicker(primaryColor),
+
+              const SizedBox(height: 30),
+              _DigitalReceipt(subtotal: widget.totalAmount, fee: _getDeliveryFee(), color: primaryColor),
+              
+              const SizedBox(height: 40),
+              _buildOrderButton(primaryColor),
+              const SizedBox(height: 60),
+            ]),
+          )
+        ]),
       ),
     );
   }
 
-  Widget _buildSummaryRow(String label, double amount, {bool isHighlighted = false}) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Text(label, style: const TextStyle(fontSize: 15, color: Colors.black54)),
-        Text('₦${amount.toStringAsFixed(2)}', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
-      ],
+  Widget _buildStepper(Color color) {
+    int step = _selectedDeliveryMethod == null ? 0 : (_pickedReceiptImage == null ? 1 : 2);
+    return Padding(padding: const EdgeInsets.symmetric(vertical: 20), child: Row(mainAxisAlignment: MainAxisAlignment.center, children: List.generate(3, (i) => Row(children: [
+      Container(width: 35, height: 35, decoration: BoxDecoration(color: i <= step ? color : Colors.white, shape: BoxShape.circle, border: Border.all(color: i <= step ? color : Colors.grey.shade300, width: 2), boxShadow: i <= step ? [BoxShadow(color: color.withOpacity(0.3), blurRadius: 10)] : null), child: Center(child: i < step ? const Icon(Icons.check, size: 18, color: Colors.white) : Text("${i + 1}", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: i <= step ? Colors.white : Colors.grey)))),
+      if (i < 2) Container(width: 50, height: 2, color: i < step ? color : Colors.grey.shade300)
+    ]))));
+  }
+
+  Widget _buildImagePicker(Color color) {
+    return GestureDetector(
+      onTap: _pickImage,
+      child: Container(
+        height: 180, width: double.infinity,
+        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(25), border: Border.all(color: color.withOpacity(0.2), width: 2, style: BorderStyle.solid), image: _pickedReceiptImage != null ? DecorationImage(image: FileImage(_pickedReceiptImage!), fit: BoxFit.cover) : null),
+        child: _pickedReceiptImage == null ? Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.add_photo_alternate_rounded, size: 45, color: color), const SizedBox(height: 10), Text("Click to upload Transfer Receipt", style: TextStyle(color: color, fontWeight: FontWeight.w900, fontSize: 13))]) : null,
+      ),
+    );
+  }
+
+  Widget _buildOrderButton(Color color) {
+    return SizedBox(
+      width: double.infinity, height: 65,
+      child: ElevatedButton(
+        onPressed: _isUploading ? null : _placeOrder,
+        style: ElevatedButton.styleFrom(backgroundColor: color, elevation: 8, shadowColor: color.withOpacity(0.3), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20))),
+        child: _isUploading ? const CustomLoader(size: 30) : const Text("PLACE SECURE ORDER", style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w900, letterSpacing: 1)),
+      ),
     );
   }
 }
 
-class SectionTitle extends StatelessWidget {
-  final String title;
-  final double bottomPadding;
-  const SectionTitle({super.key, required this.title, this.bottomPadding = 10});
-  @override
-  Widget build(BuildContext context) => Padding(padding: EdgeInsets.only(bottom: bottomPadding, left: 5), child: Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)));
-}
+// --- PROFESSIONAL ADDRESS CARD ---
+class _AddressSelectorCard extends StatelessWidget {
+  final UserAddress? selectedAddress;
+  final List<UserAddress> addresses;
+  final Color primaryColor;
+  final VoidCallback onRefresh;
 
-class StepHeader extends StatelessWidget {
-  final String number;
-  final String title;
-  const StepHeader({super.key, required this.number, required this.title});
-  @override
-  Widget build(BuildContext context) => Row(children: [CircleAvatar(radius: 12, backgroundColor: Colors.black, child: Text(number, style: const TextStyle(color: Colors.white, fontSize: 12))), const SizedBox(width: 10), Text(title, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold))]);
-}
-
-class BankDetailsCard extends StatelessWidget {
-  final String bankName;
-  final String accountNumber;
-  final String accountName;
-  final Function(String, String) onCopy;
-
-  const BankDetailsCard({super.key, required this.bankName, required this.accountNumber, required this.accountName, required this.onCopy});
+  const _AddressSelectorCard({required this.selectedAddress, required this.addresses, required this.primaryColor, required this.onRefresh});
 
   @override
   Widget build(BuildContext context) {
+    final bool hasData = addresses.isNotEmpty;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(color: Colors.blueGrey.shade900, borderRadius: BorderRadius.circular(16)),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(bankName.toUpperCase(), style: const TextStyle(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 10),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(accountNumber, style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
-              IconButton(onPressed: () => onCopy(accountNumber, 'Account Number'), icon: const Icon(Icons.copy, color: Colors.cyan))
-            ],
-          ),
-          const SizedBox(height: 5),
-          Text(accountName, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w500)),
-        ],
-      ),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(25), border: Border.all(color: Colors.grey.shade200)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+          Text("SHIPPING DESTINATION", style: TextStyle(fontSize: 10, fontWeight: FontWeight.w900, color: Colors.grey.shade400, letterSpacing: 1.2)),
+          InkWell(
+            onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const UserAddressesScreen())).then((_) => onRefresh()),
+            child: Text(hasData ? "CHANGE / ADD" : "ADD NEW", style: TextStyle(color: primaryColor, fontWeight: FontWeight.w900, fontSize: 12)),
+          )
+        ]),
+        const SizedBox(height: 12),
+        if (hasData) ...[
+          Row(children: [
+            Icon(Icons.home_outlined, color: primaryColor),
+            const SizedBox(width: 15),
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(selectedAddress?.street ?? addresses.first.street, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15, color: Colors.black87)),
+              Text("${selectedAddress?.city ?? addresses.first.city}, Edo State", style: TextStyle(color: Colors.grey.shade500, fontSize: 12)),
+            ]))
+          ])
+        ] else ...[
+          const Center(child: Text("No delivery address found in your profile", style: TextStyle(color: Colors.grey, fontSize: 12, fontStyle: FontStyle.italic)))
+        ]
+      ]),
     );
   }
+}
+
+// --- UI COMPONENTS ---
+class _ModernInputBox extends StatelessWidget {
+  final IconData icon; final String text; final bool isSelected; final Color color;
+  const _ModernInputBox({required this.icon, required this.text, required this.isSelected, required this.color});
+  @override
+  Widget build(BuildContext context) => Container(padding: const EdgeInsets.all(20), decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(25), border: Border.all(color: isSelected ? color : Colors.grey.shade200, width: 2)), child: Row(children: [Icon(icon, color: color), const SizedBox(width: 15), Expanded(child: Text(text, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: isSelected ? Colors.black : Colors.grey))), const Icon(Icons.expand_more_rounded, color: Colors.grey)]));
+}
+
+class _MethodCard extends StatelessWidget {
+  final String title, subtitle; final IconData icon; final bool isSelected; final VoidCallback onTap; final Color color;
+  const _MethodCard({required this.title, required this.subtitle, required this.icon, required this.isSelected, required this.onTap, required this.color});
+  @override
+  Widget build(BuildContext context) => Expanded(child: GestureDetector(onTap: onTap, child: AnimatedContainer(duration: const Duration(milliseconds: 200), padding: const EdgeInsets.symmetric(vertical: 25), decoration: BoxDecoration(color: isSelected ? color : Colors.white, borderRadius: BorderRadius.circular(25), boxShadow: [BoxShadow(color: isSelected ? color.withOpacity(0.3) : Colors.black.withOpacity(0.04), blurRadius: 15, offset: const Offset(0, 10))]), child: Column(children: [Icon(icon, color: isSelected ? Colors.white : Colors.grey, size: 35), const SizedBox(height: 10), Text(title, style: TextStyle(fontWeight: FontWeight.w900, color: isSelected ? Colors.white : Colors.black87)), Text(subtitle, style: TextStyle(fontSize: 10, color: isSelected ? Colors.white70 : Colors.grey))]))));
+}
+
+class _ModernBankCard extends StatelessWidget {
+  final String bankName, accountNumber, accountName; final Function(String, String) onCopy;
+  const _ModernBankCard({required this.bankName, required this.accountNumber, required this.accountName, required this.onCopy});
+  @override
+  Widget build(BuildContext context) => Container(width: double.infinity, padding: const EdgeInsets.all(25), decoration: BoxDecoration(borderRadius: BorderRadius.circular(30), gradient: const LinearGradient(colors: [Color(0xFF1E293B), Color(0xFF0F172A)], begin: Alignment.topLeft, end: Alignment.bottomRight), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 20, offset: const Offset(0, 10))]), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text(bankName.toUpperCase(), style: const TextStyle(color: Colors.cyanAccent, fontWeight: FontWeight.w900, letterSpacing: 2, fontSize: 14)), const Icon(Icons.nfc_rounded, color: Colors.white24)]), const SizedBox(height: 25), GestureDetector(onTap: () => onCopy(accountNumber, "Account Number"), child: Row(children: [Expanded(child: Text(accountNumber, style: const TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.w900, letterSpacing: 4, fontFamily: 'monospace'))), const Icon(Icons.copy_rounded, color: Colors.white38, size: 22)])), const SizedBox(height: 20), Text(accountName, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 14))]));
+}
+
+class _ModernRegionPicker extends StatefulWidget {
+  final List<Map<String, dynamic>> locations; final Function(Map<String, dynamic>) onSelected;
+  const _ModernRegionPicker({required this.locations, required this.onSelected});
+  @override
+  State<_ModernRegionPicker> createState() => _ModernRegionPickerState();
+}
+
+class _ModernRegionPickerState extends State<_ModernRegionPicker> {
+  String query = "";
+  @override
+  Widget build(BuildContext context) {
+    final filtered = widget.locations.where((l) => l['name'].toLowerCase().contains(query.toLowerCase())).toList();
+    return Container(height: MediaQuery.of(context).size.height * 0.75, decoration: const BoxDecoration(color: Colors.white, borderRadius: BorderRadius.vertical(top: Radius.circular(40))), padding: const EdgeInsets.all(25), child: Column(children: [Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(10))), const SizedBox(height: 25), const Text("Search Delivery Area", style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900)), const SizedBox(height: 20), TextField(onChanged: (v) => setState(() => query = v), decoration: InputDecoration(hintText: "Search Benin regions...", prefixIcon: const Icon(Icons.search_rounded), filled: true, fillColor: const Color(0xFFF1F5F9), border: OutlineInputBorder(borderRadius: BorderRadius.circular(20), borderSide: BorderSide.none))), const SizedBox(height: 15), Expanded(child: ListView.separated(itemCount: filtered.length, separatorBuilder: (_, __) => const Divider(height: 1), itemBuilder: (ctx, i) => ListTile(onTap: () { widget.onSelected(filtered[i]); Navigator.pop(context); }, title: Text(filtered[i]['name'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)), trailing: Text("₦${filtered[i]['fee'].toInt()}", style: const TextStyle(color: Colors.green, fontWeight: FontWeight.w900, fontSize: 14)), leading: const Icon(Icons.location_on_outlined, color: Colors.redAccent)))) ]));
+  }
+}
+
+class _DigitalReceipt extends StatelessWidget {
+  final double subtotal, fee; final Color color;
+  const _DigitalReceipt({required this.subtotal, required this.fee, required this.color});
+  @override
+  Widget build(BuildContext context) => Container(padding: const EdgeInsets.all(30), decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(30), border: Border.all(color: Colors.grey.shade100)), child: Column(children: [
+    _row("Item Subtotal", "₦${subtotal.toStringAsFixed(2)}"), const SizedBox(height: 12),
+    _row("Delivery Cost", "₦${fee.toStringAsFixed(2)}"), const Padding(padding: EdgeInsets.symmetric(vertical: 20), child: Divider(height: 1)),
+    Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+      const Text("ORDER TOTAL", style: TextStyle(fontWeight: FontWeight.w900, color: Colors.grey, fontSize: 12)),
+      Text("₦${(subtotal + fee).toStringAsFixed(2)}", style: TextStyle(fontSize: 26, fontWeight: FontWeight.w900, color: color))
+    ]) 
+  ]));
+  Widget _row(String l, String v) => Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text(l, style: const TextStyle(color: Colors.grey, fontWeight: FontWeight.bold, fontSize: 14)), Text(v, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 14))]);
+}
+
+class SectionHeader extends StatelessWidget {
+  final String title; const SectionHeader({super.key, required this.title});
+  @override
+  Widget build(BuildContext context) => Padding(padding: const EdgeInsets.only(bottom: 12, left: 5), child: Text(title.toUpperCase(), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w900, color: Colors.black54, letterSpacing: 1.5)));
 }
 
 class OrderSuccessScreen extends StatelessWidget {
   const OrderSuccessScreen({super.key});
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.check_circle, color: Colors.green, size: 80),
-            const SizedBox(height: 20),
-            const Text('Order Submitted!', style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 40),
-            ElevatedButton(onPressed: () => Navigator.of(context).popUntil((r) => r.isFirst), child: const Text("BACK TO HOME")),
-          ],
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => Scaffold(body: Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
+    const Icon(Icons.check_circle_rounded, size: 120, color: Colors.greenAccent), const SizedBox(height: 25),
+    const Text("ORDER SUBMITTED!", style: TextStyle(fontSize: 28, fontWeight: FontWeight.w900)),
+    const Padding(padding: EdgeInsets.symmetric(horizontal: 50, vertical: 15), child: Text("Success! We are verifying your bank transfer. You will receive a notification shortly.", textAlign: TextAlign.center, style: TextStyle(color: Colors.grey, fontSize: 14))),
+    const SizedBox(height: 40),
+    ElevatedButton(onPressed: () => Navigator.of(context).popUntil((r) => r.isFirst), style: ElevatedButton.styleFrom(backgroundColor: Colors.black, padding: const EdgeInsets.symmetric(horizontal: 60, vertical: 22), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(25))), child: const Text("BACK TO HOME", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold))) 
+  ])));
 }

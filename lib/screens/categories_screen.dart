@@ -14,18 +14,24 @@ class CategoriesScreen extends StatefulWidget {
 }
 
 class _CategoriesScreenState extends State<CategoriesScreen> {
-  
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
+
   @override
   void initState() {
     super.initState();
-    // Trigger the fetch logic only if the list is empty to save reads,
-    // otherwise the user can pull-to-refresh.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final provider = Provider.of<CategoryProvider>(context, listen: false);
       if (provider.categories.isEmpty) {
         provider.fetchCategories();
       }
     });
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
   }
 
   // Logic for pull-to-refresh
@@ -43,30 +49,69 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // --- HEADER SECTION ---
+          // --- HEADER & SEARCH SECTION ---
           Container(
-            padding: const EdgeInsets.fromLTRB(20, 60, 20, 15), 
+            padding: const EdgeInsets.fromLTRB(20, 60, 20, 20),
             color: backgroundColor,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
-              children: const [
-                Text(
+              children: [
+                const Text(
                   'Explore',
                   style: TextStyle(
-                    fontSize: 30,
+                    fontSize: 32,
                     fontWeight: FontWeight.w900,
                     color: Colors.black87,
                     letterSpacing: -0.5,
-                    height: 1.0,
                   ),
                 ),
-                SizedBox(height: 8),
-                Text(
-                  'Browse by category',
-                  style: TextStyle(
-                    fontSize: 16,
-                    color: Colors.grey,
-                    fontWeight: FontWeight.w500,
+                const SizedBox(height: 5),
+                const Text(
+                  'Search for your favorite categories',
+                  style: TextStyle(fontSize: 14, color: Colors.grey, fontWeight: FontWeight.w500),
+                ),
+                const SizedBox(height: 20),
+                
+                // --- SEARCH BAR WITH CANCEL BUTTON ---
+                Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(15),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.03),
+                        blurRadius: 10,
+                        offset: const Offset(0, 4),
+                      )
+                    ],
+                  ),
+                  child: TextField(
+                    controller: _searchController,
+                    onChanged: (value) {
+                      setState(() {
+                        _searchQuery = value.toLowerCase();
+                      });
+                    },
+                    decoration: InputDecoration(
+                      hintText: "Search categories...",
+                      hintStyle: const TextStyle(color: Colors.grey, fontSize: 15),
+                      prefixIcon: const Icon(Icons.search_rounded, color: orangeColor),
+                      // CLEAR BUTTON
+                      suffixIcon: _searchQuery.isNotEmpty
+                          ? IconButton(
+                              icon: const Icon(Icons.cancel_rounded, color: Colors.grey),
+                              onPressed: () {
+                                _searchController.clear();
+                                setState(() {
+                                  _searchQuery = '';
+                                });
+                                FocusScope.of(context).unfocus();
+                              },
+                            )
+                          : null,
+                      border: InputBorder.none,
+                      contentPadding: const EdgeInsets.symmetric(vertical: 15),
+                    ),
                   ),
                 ),
               ],
@@ -77,22 +122,24 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
           Expanded(
             child: Consumer<CategoryProvider>(
               builder: (context, categoryProvider, child) {
-                
-                // 1. Loading State (Shows signature 08 loader)
+                // 1. Loading State
                 if (categoryProvider.isLoading && categoryProvider.categories.isEmpty) {
                   return const Center(child: CustomLoader(size: 70));
                 }
 
-                // 2. Error State (Shows retry button)
+                // 2. Error State
                 if (categoryProvider.errorMessage != null && categoryProvider.categories.isEmpty) {
                   return _buildErrorView(categoryProvider, orangeColor);
                 }
 
-                // 3. Filter only active categories from the database
-                final activeCategories = categoryProvider.categories.where((c) => c.active).toList();
+                // 3. Filter active categories AND search query
+                final displayCategories = categoryProvider.categories.where((c) {
+                  final matchesSearch = c.name.toLowerCase().contains(_searchQuery);
+                  return c.active && matchesSearch;
+                }).toList();
 
-                // 4. Empty State
-                if (activeCategories.isEmpty) {
+                // 4. Empty State (No search results)
+                if (displayCategories.isEmpty) {
                   return _buildEmptyView(categoryProvider, orangeColor);
                 }
 
@@ -102,17 +149,16 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
                   color: orangeColor,
                   child: GridView.builder(
                     padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 10.0),
-                    // AlwaysScrollableScrollPhysics is crucial for RefreshIndicator to work even if list is short
                     physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
                     gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                       crossAxisCount: 2,
                       crossAxisSpacing: 15.0,
                       mainAxisSpacing: 15.0,
-                      childAspectRatio: 0.85, 
+                      childAspectRatio: 0.82,
                     ),
-                    itemCount: activeCategories.length,
+                    itemCount: displayCategories.length,
                     itemBuilder: (context, index) {
-                      final category = activeCategories[index];
+                      final category = displayCategories[index];
                       return CategoryGridItem(category: category, accentColor: orangeColor);
                     },
                   ),
@@ -125,7 +171,6 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
     );
   }
 
-  // Error layout when fetch fails
   Widget _buildErrorView(CategoryProvider provider, Color accentColor) {
     return Center(
       child: Column(
@@ -133,54 +178,45 @@ class _CategoriesScreenState extends State<CategoriesScreen> {
         children: [
           Icon(Icons.cloud_off_rounded, size: 50, color: Colors.red[300]),
           const SizedBox(height: 15),
-          const Text(
-            'Connection Error', 
-            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)
-          ),
+          const Text('Connection Error', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
           const SizedBox(height: 5),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 40),
-            child: Text(
-              provider.errorMessage!, 
-              style: const TextStyle(color: Colors.grey), 
-              textAlign: TextAlign.center
-            ),
+            child: Text(provider.errorMessage!, style: const TextStyle(color: Colors.grey), textAlign: TextAlign.center),
           ),
           const SizedBox(height: 20),
           ElevatedButton(
             onPressed: () => provider.fetchCategories(),
             style: ElevatedButton.styleFrom(
-              backgroundColor: accentColor, 
-              foregroundColor: Colors.white,
+              backgroundColor: accentColor,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 12)
             ),
-            child: const Text('TRY AGAIN', style: TextStyle(fontWeight: FontWeight.bold)),
+            child: const Text('TRY AGAIN', style: TextStyle(color: Colors.white)),
           ),
         ],
       ),
     );
   }
 
-  // Layout when no categories are found in Firestore
   Widget _buildEmptyView(CategoryProvider provider, Color accentColor) {
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.category_outlined, size: 70, color: Colors.grey[300]),
+          Icon(Icons.search_off_rounded, size: 70, color: Colors.grey[300]),
           const SizedBox(height: 15),
-          const Text(
-            'No categories found', 
-            style: TextStyle(fontSize: 18, color: Colors.grey, fontWeight: FontWeight.bold)
+          Text(
+            _searchQuery.isEmpty ? 'No categories found' : 'No matches for "$_searchQuery"',
+            style: const TextStyle(fontSize: 16, color: Colors.grey, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 20),
-          TextButton.icon(
-            onPressed: () => provider.fetchCategories(),
-            icon: const Icon(Icons.refresh_rounded),
-            label: const Text('REFRESH LIST'),
-            style: TextButton.styleFrom(foregroundColor: accentColor),
-          ),
+          if (_searchQuery.isEmpty)
+            TextButton.icon(
+              onPressed: () => provider.fetchCategories(),
+              icon: const Icon(Icons.refresh_rounded),
+              label: const Text('REFRESH LIST'),
+              style: TextButton.styleFrom(foregroundColor: accentColor),
+            ),
         ],
       ),
     );
@@ -197,10 +233,9 @@ class CategoryGridItem extends StatelessWidget {
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: () {
+        // Navigation results in Listing Screen which filters stock and newest first
         Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (ctx) => ProductListingScreen(categoryName: category.name),
-          ),
+          MaterialPageRoute(builder: (ctx) => ProductListingScreen(categoryName: category.name)),
         );
       },
       child: Container(
@@ -209,9 +244,9 @@ class CategoryGridItem extends StatelessWidget {
           borderRadius: BorderRadius.circular(24.0),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.04), 
-              offset: const Offset(0, 4), 
-              blurRadius: 15
+              color: Colors.black.withOpacity(0.04),
+              offset: const Offset(0, 4),
+              blurRadius: 15,
             ),
           ],
         ),
@@ -223,7 +258,6 @@ class CategoryGridItem extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.center,
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  // --- CATEGORY IMAGE ---
                   Expanded(
                     flex: 3,
                     child: Padding(
@@ -232,26 +266,15 @@ class CategoryGridItem extends StatelessWidget {
                           ? Hero(
                               tag: 'catImg${category.name}',
                               child: CachedNetworkImage(
-                                imageUrl: category.imageUrl,
+                                imageUrl: category.imageUrl, // Field name: imageUrl
                                 fit: BoxFit.contain,
-                                // Placeholder uses small custom loader
                                 placeholder: (context, url) => const Center(child: CustomLoader(size: 25)),
-                                errorWidget: (context, url, error) => Icon(
-                                  category.icon ?? Icons.category, 
-                                  size: 40, 
-                                  color: Colors.grey[200]
-                                ),
+                                errorWidget: (context, url, error) => const Icon(Icons.category, size: 40, color: Colors.grey),
                               ),
                             )
-                          : Icon(
-                              category.icon ?? Icons.category, 
-                              size: 50, 
-                              color: accentColor.withOpacity(0.2)
-                            ),
+                          : const Icon(Icons.category, size: 50, color: Colors.grey),
                     ),
                   ),
-                  
-                  // --- CATEGORY NAME ---
                   Expanded(
                     flex: 1,
                     child: Container(
@@ -260,11 +283,7 @@ class CategoryGridItem extends StatelessWidget {
                       child: Text(
                         category.name,
                         textAlign: TextAlign.center,
-                        style: const TextStyle(
-                          fontSize: 15, 
-                          fontWeight: FontWeight.w800, 
-                          color: Colors.black87
-                        ),
+                        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: Colors.black87),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -272,23 +291,14 @@ class CategoryGridItem extends StatelessWidget {
                   ),
                 ],
               ),
-              
-              // --- DECORATIVE ARROW ICON ---
               Positioned(
                 top: 15,
                 right: 15,
                 child: Container(
                   width: 28,
                   height: 28,
-                  decoration: BoxDecoration(
-                    color: Colors.grey[50], 
-                    shape: BoxShape.circle
-                  ),
-                  child: Icon(
-                    Icons.arrow_outward_rounded, 
-                    size: 14, 
-                    color: accentColor
-                  ),
+                  decoration: BoxDecoration(color: Colors.grey[50], shape: BoxShape.circle),
+                  child: Icon(Icons.arrow_outward_rounded, size: 14, color: accentColor),
                 ),
               ),
             ],

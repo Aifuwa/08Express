@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -21,8 +22,9 @@ class UserProvider with ChangeNotifier {
   
   // Onboarding / Intro State
   bool _isFirstTime = true; 
-  bool _isIntroCheckDone = false; // New: confirms Prefs have been read
+  bool _isIntroCheckDone = false; // Confirms SharedPreferences have been read
   bool _isTransitioning = false; 
+  bool _isIntroCompleted = false; // Flag used by main.dart RootGatekeeper
 
   // Phone Auth State
   String? _verificationId;
@@ -33,29 +35,36 @@ class UserProvider with ChangeNotifier {
     _initUserProvider();
   }
 
+  /// Initializes the provider by checking local onboarding status 
+  /// and listening to Firebase Auth state changes.
   Future<void> _initUserProvider() async {
     try {
       // 1. Load Local Storage (Onboarding Status)
       final prefs = await SharedPreferences.getInstance();
       _isFirstTime = prefs.getBool('is_first_time') ?? true;
+      
+      // Sync the completion flag with the local storage value
+      if (!_isFirstTime) {
+        _isIntroCompleted = true;
+      }
+      
       _isIntroCheckDone = true; 
-      // Notify immediately so AuthWrapper knows it can proceed
       notifyListeners(); 
       
-      // 2. Listen to Persistent Auth Changes (Keeps user logged in)
+      // 2. Listen to Persistent Auth Changes
       _auth.authStateChanges().listen((firebaseUser) async {
         _firebaseUser = firebaseUser;
         
         if (_firebaseUser != null) {
-          // User is logged in
+          // User is authenticated
           _isGuestMode = false;
-          _isLoading = true; // Show loader while fetching profile
+          _isLoading = true; 
           notifyListeners();
 
           // Load the specific user profile from Firestore
           await fetchUserProfile();
         } else {
-          // User is logged out
+          // User is logged out or session expired
           _appUser = null;
           _isProfileLoaded = false;
           _isGuestMode = false;
@@ -67,7 +76,7 @@ class UserProvider with ChangeNotifier {
     } catch (e) {
       debugPrint("Initialization Error: $e");
       _isLoading = false;
-      _isIntroCheckDone = true; // Ensure we don't get stuck
+      _isIntroCheckDone = true; 
       notifyListeners();
     }
   }
@@ -80,14 +89,14 @@ class UserProvider with ChangeNotifier {
   bool get isLoading => _isLoading; 
   bool get isProfileLoaded => _isProfileLoaded;
   bool get isTransitioning => _isTransitioning;
-  
-  // Gatekeeper Getters
   bool get isFirstTime => _isFirstTime;
   bool get isIntroCheckDone => _isIntroCheckDone;
+  bool get isIntroCompleted => _isIntroCompleted; // The getter required by main.dart
+  bool get isEmailVerified => _firebaseUser?.emailVerified ?? false;
 
   // --- CORE PROFILE MANAGEMENT ---
 
-  /// Public method to fetch/refresh the user profile from Firestore.
+  /// Fetches the user document from Firestore.
   Future<void> fetchUserProfile() async {
     if (_firebaseUser == null) return;
 
@@ -96,19 +105,22 @@ class UserProvider with ChangeNotifier {
           .collection('users')
           .doc(_firebaseUser!.uid)
           .get()
-          .timeout(const Duration(seconds: 10));
+          .timeout(const Duration(seconds: 15));
       
       if (doc.exists) {
         _appUser = AppUser.fromFirestore(doc);
         _isGuestMode = false; 
 
-        // DATA REPAIR: If Firestore has no email, but Auth does, patch it.
+        // DATA REPAIR: If Firestore has no email, but Firebase Auth does, sync them.
         if ((_appUser!.email == null || _appUser!.email!.isEmpty) && _firebaseUser?.email != null) {
           _appUser!.email = _firebaseUser!.email;
-          await _firestore.collection('users').doc(_firebaseUser!.uid).update({'email': _appUser!.email});
+          await _firestore.collection('users').doc(_firebaseUser!.uid).update({
+            'email': _appUser!.email,
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
         }
       } else {
-        // Critical: If Auth exists but Firestore doc doesn't, create it now.
+        // Critical: Auth exists but DB document is missing (e.g. manual delete in console)
         await createInitialUserDocument(_firebaseUser!);
       }
       
@@ -116,50 +128,40 @@ class UserProvider with ChangeNotifier {
       notifyListeners();
     } catch (e) {
       debugPrint("Error fetching profile: $e");
-      // Mark as loaded even on error to stop infinite loading spinners
       _isProfileLoaded = true; 
       notifyListeners();
     }
   }
 
-  /// Creates the database entry for a new user.
+  /// Creates the database entry for a new user with default fields.
   Future<void> createInitialUserDocument(User user) async {
     try {
       final docRef = _firestore.collection('users').doc(user.uid);
-      final doc = await docRef.get();
 
-      if (!doc.exists) {
-        AppUser newUser = AppUser(
-          uid: user.uid,
-          email: user.email, 
-          name: user.displayName ?? (user.email != null ? user.email!.split('@')[0] : "User"),
-          isAdmin: false,
-          setupComplete: false, 
-          wishlist: [],
-          addresses: [],
-        );
+      AppUser newUser = AppUser(
+        uid: user.uid,
+        email: user.email, 
+        name: user.displayName ?? (user.email != null ? user.email!.split('@')[0] : "User"),
+        isAdmin: false,
+        setupComplete: false, 
+        wishlist: [],
+        addresses: [],
+      );
 
-        // Update local state immediately for UI responsiveness
-        _appUser = newUser;
-        _isProfileLoaded = true;
-        _isGuestMode = false;
-        notifyListeners();
-
-        // Persist to database
-        await docRef.set(newUser.toFirestore());
-      } else {
-        // If it existed (edge case), load it
-        _appUser = AppUser.fromFirestore(doc);
-        _isProfileLoaded = true;
-        _isGuestMode = false;
-        notifyListeners();
-      }
+      // Persist to database
+      await docRef.set(newUser.toFirestore());
+      
+      // Update local state
+      _appUser = newUser;
+      _isProfileLoaded = true;
+      _isGuestMode = false;
+      notifyListeners();
     } catch (e) {
       debugPrint("Initial document creation failed: $e");
     }
   }
 
-  /// Called by the Onboarding Modal in HomeScreen to finalize registration.
+  /// CRITICAL: Completes the user's profile with delivery details.
   Future<void> completeProfileSetup({
     required String name,
     required String phone,
@@ -180,7 +182,7 @@ class UserProvider with ChangeNotifier {
     );
 
     try {
-      // Update Firestore
+      // 1. Update Firestore Database
       await _firestore.collection('users').doc(_firebaseUser!.uid).update({
         'name': name,
         'phoneNumber': phone,
@@ -189,21 +191,24 @@ class UserProvider with ChangeNotifier {
         'updatedAt': FieldValue.serverTimestamp(),
       });
 
-      // Update Local State directly 
+      // 2. Update Local State Immediately
       if (_appUser != null) {
         _appUser!.name = name;
         _appUser!.phoneNumber = phone;
         _appUser!.addresses = [address];
         _appUser!.setupComplete = true;
-        notifyListeners();
       } else {
         await fetchUserProfile();
       }
+      
+      notifyListeners(); 
     } catch (e) {
       debugPrint("Error completing setup: $e");
+      rethrow; 
     }
   }
 
+  /// Generic method to update specific user profile fields.
   Future<void> updateAppUserProfile({String? name, String? imageUrl, String? phoneNumber}) async {
     if (_firebaseUser == null) return;
 
@@ -288,6 +293,7 @@ class UserProvider with ChangeNotifier {
       AuthCredential cred = EmailAuthProvider.credential(email: user.email!, password: password);
       await user.reauthenticateWithCredential(cred);
       
+      // Delete from DB first, then Auth
       await _firestore.collection('users').doc(user.uid).delete();
       await user.delete();
       await signOut();
@@ -304,11 +310,12 @@ class UserProvider with ChangeNotifier {
     notifyListeners();
   }
 
-  /// CRITICAL: Call this when user clicks "Get Started" on Onboarding Screen
+  /// Marks the intro/onboarding screen as seen forever.
   Future<void> completeIntro() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('is_first_time', false);
     _isFirstTime = false;
+    _isIntroCompleted = true; // Update the flag for RootGatekeeper
     notifyListeners(); 
   }
 
@@ -324,7 +331,6 @@ class UserProvider with ChangeNotifier {
     _isGuestMode = false; 
     _isProfileLoaded = false; 
     _isTransitioning = false;
-    // Note: We do NOT reset _isFirstTime here, because they have already seen intro.
     notifyListeners(); 
   }
 
@@ -332,6 +338,7 @@ class UserProvider with ChangeNotifier {
 
   Future<void> addAddress(UserAddress newAddress) async {
      if (_appUser == null) return;
+     
      if (newAddress.isDefault) { 
        for (var addr in _appUser!.addresses) {
          addr.isDefault = false;
@@ -363,11 +370,15 @@ class UserProvider with ChangeNotifier {
 
   Future<void> _saveAddressesToFirestore() async {
     if (_firebaseUser == null) return;
-    await _firestore.collection('users').doc(_firebaseUser!.uid).update({
-      'addresses': _appUser!.addresses.map((addr) => addr.toMap()).toList(),
-      'updatedAt': FieldValue.serverTimestamp(),
-    });
-    notifyListeners();
+    try {
+      await _firestore.collection('users').doc(_firebaseUser!.uid).update({
+        'addresses': _appUser!.addresses.map((addr) => addr.toMap()).toList(),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      notifyListeners();
+    } catch (e) {
+      debugPrint("Address Sync Error: $e");
+    }
   }
 
   bool isInWishlist(String productId) => _appUser?.wishlist.contains(productId) ?? false;
@@ -375,6 +386,7 @@ class UserProvider with ChangeNotifier {
   Future<void> toggleWishlist(String productId) async {
     if (_firebaseUser == null || _appUser == null) return;
     
+    // Optimistic UI Update
     if (_appUser!.wishlist.contains(productId)) {
       _appUser!.wishlist.remove(productId);
     } else {
@@ -389,19 +401,23 @@ class UserProvider with ChangeNotifier {
       });
     } catch (e) {
       debugPrint("Wishlist sync error: $e");
+      await fetchUserProfile();
     }
   }
   
+  /// Uploads and updates profile picture.
   Future<void> uploadProfileImage(File imageFile) async {
      if (_firebaseUser == null) return;
      try {
        String fileName = 'profile_${_firebaseUser!.uid}.jpg';
        Reference ref = _storage.ref().child('user_profiles').child(fileName);
+       
        await ref.putFile(imageFile);
        String url = await ref.getDownloadURL();
        await updateAppUserProfile(imageUrl: url);
      } catch (e) {
        debugPrint("Upload failed: $e");
+       rethrow;
      }
   }
 }
