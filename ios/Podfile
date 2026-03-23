@@ -1,9 +1,7 @@
-# Set platform to 15.0 as required by the latest cloud_firestore
+# Set platform to 15.0 for Firebase
 platform :ios, '15.0'
 
 # --- START FLUTTER LOADER ---
-# This section tells the Podfile how to find the Flutter build tools
-# so that the 'flutter_install_all_ios_pods' method works.
 def flutter_root
   generated_xcode_build_settings_path = File.expand_path(File.join('..', 'Flutter', 'Generated.xcconfig'), __FILE__)
   unless File.exist?(generated_xcode_build_settings_path)
@@ -24,7 +22,6 @@ target 'Runner' do
   use_frameworks!
   use_modular_headers!
 
-  # This is the line that was failing before
   flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
 end
 
@@ -32,7 +29,7 @@ post_install do |installer|
   installer.pods_project.targets.each do |target|
     flutter_additional_ios_build_settings(target)
     
-    # This loop ensures every single plugin is forced to iOS 15.0
+    # This loop forces all plugins to version 15.0 to match your project
     target.build_configurations.each do |config|
       config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.0'
     end
