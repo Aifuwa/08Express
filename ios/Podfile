@@ -1,14 +1,35 @@
-# Set platform to 15.0 for Firebase
+# Set platform to 15.0 for Firebase compatibility
 platform :ios, '15.0'
 
-# Point to the helper file we just created
-load File.join(File.dirname(File.realpath(__FILE__)), 'Flutter', 'podhelper.rb')
+# --- CLOUD SDK LOADER ---
+# This logic works on Codemagic by finding the SDK in the system environment
+def flutter_root
+  r = ENV['FLUTTER_ROOT']
+  if r.nil? || r.empty?
+    # Fallback for local machines
+    generated_xcode_build_settings_path = File.expand_path(File.join('..', 'Flutter', 'Generated.xcconfig'), __FILE__)
+    if File.exist?(generated_xcode_build_settings_path)
+      File.foreach(generated_xcode_build_settings_path) do |line|
+        matches = line.match(/\AFLUTTER_ROOT=(.*)\z/)
+        return matches[1].strip if matches
+      end
+    end
+  end
+  r
+end
+
+podhelper_path = File.join(flutter_root, 'packages', 'flutter_tools', 'bin', 'podhelper.rb')
+if File.exist?(podhelper_path)
+  load podhelper_path
+else
+  raise "Flutter SDK not found. Ensure 'Run flutter pub get' is enabled in Codemagic."
+end
+# --- END CLOUD SDK LOADER ---
 
 target 'Runner' do
   use_frameworks!
   use_modular_headers!
 
-  # This calls the function inside the podhelper.rb
   flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
 end
 
@@ -16,9 +37,10 @@ post_install do |installer|
   installer.pods_project.targets.each do |target|
     flutter_additional_ios_build_settings(target)
     
-    # Ensures all plugins match iOS 15.0
     target.build_configurations.each do |config|
+      # Force 15.0 for all pods
       config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.0'
+      # Required for modern Firebase
       config.build_settings['ENABLE_BITCODE'] = 'NO'
     end
   end
