@@ -8,8 +8,7 @@ class NotificationService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
   // --- 1. GET Real-time Stream of Notifications ---
-  // IMPORTANT: This query REQUIRES a Composite Index in Firestore:
-  // Collection: broadcasts | Fields: target (Ascending), timestamp (Descending)
+  // Matches Index: Collection: broadcasts | target (Asc) + timestamp (Desc)
   Stream<List<AppNotification>> getNotifications() {
     final user = _auth.currentUser;
     if (user == null) return Stream.value([]);
@@ -20,16 +19,26 @@ class NotificationService {
         .orderBy('timestamp', descending: true)
         .snapshots(includeMetadataChanges: true)
         .map((snap) {
-          // We map each document through the fromFirestore factory
-          final docs = snap.docs.where((doc) => doc.get('timestamp') != null).toList();
-          return snap.docs.map((doc) => AppNotification.fromFirestore(doc)).toList();
+          // IMPORTANT: We filter out documents where the server timestamp hasn't 
+          // propagated yet to prevent null-pointer errors in the UI.
+          return snap.docs
+              .where((doc) {
+                try {
+                  return doc.get('timestamp') != null;
+                } catch (e) {
+                  return false;
+                }
+              })
+              .map((doc) => AppNotification.fromFirestore(doc))
+              .toList();
         })
         .handleError((error) {
           if (error.toString().contains('failed-precondition') || error.toString().contains('index')) {
             debugPrint("=================================================");
-            debugPrint("🚨 FIRESTORE INDEX MISSING!");
-            debugPrint("To see notifications, click the link in the error below:");
-            debugPrint(error.toString());
+            debugPrint("🚨 FIRESTORE INDEX MISSING OR MISMATCHED!");
+            debugPrint("Collection: broadcasts");
+            debugPrint("Required: target (Asc) + timestamp (Desc)");
+            debugPrint("Link: ${error.toString().split('here: ').last}");
             debugPrint("=================================================");
           } else {
             debugPrint("❌ Notification Stream Error: $error");
@@ -39,11 +48,10 @@ class NotificationService {
   }
 
   // --- 2. SAVE Notification ---
-  // This saves to the 'broadcasts' collection using your schema
   Future<void> saveNotification({
     required String title,
     required String body,
-    String type = 'home', // This will be saved as 'screen' in Firestore
+    String type = 'home', 
     String? orderId,
     String? manualUserId, 
   }) async {
@@ -56,16 +64,16 @@ class NotificationService {
 
     try {
       await _firestore.collection('broadcasts').add({
-        'target': uid,            // Who receives it
-        'title': title,           // Notification title
-        'body': body,             // Notification text
-        'timestamp': FieldValue.serverTimestamp(), // Used for ordering
-        'sentAt': FieldValue.serverTimestamp(),    // Audit timestamp
-        'isRead': false,          // Default state
-        'screen': type,           // Maps to 'type' in your UI logic
-        'orderId': orderId,       // Optional order reference
-        'status': 'sent',         // Delivery status
-        'senderEmail': 'system@eightexpress.com', // System ID
+        'target': uid,
+        'title': title,
+        'body': body,
+        'timestamp': FieldValue.serverTimestamp(), // Critical for ordering
+        'sentAt': FieldValue.serverTimestamp(),
+        'isRead': false,
+        'screen': type,
+        'orderId': orderId,
+        'status': 'sent',
+        'senderEmail': 'system@eightexpress.com',
       });
       debugPrint("✅ Notification saved to broadcasts for target: $uid");
     } catch (e) {
@@ -117,15 +125,16 @@ class NotificationService {
     if (user == null) return;
 
     try {
-      final batch = _firestore.batch();
-      final userNotifications = await _firestore
+      final snapshots = await _firestore
           .collection('broadcasts')
           .where('target', isEqualTo: user.uid)
           .get();
 
-      if (userNotifications.docs.isEmpty) return;
+      if (snapshots.docs.isEmpty) return;
 
-      for (var doc in userNotifications.docs) {
+      // Using WriteBatch for performance
+      final batch = _firestore.batch();
+      for (var doc in snapshots.docs) {
         batch.delete(doc.reference);
       }
       
