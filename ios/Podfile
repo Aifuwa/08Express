@@ -1,23 +1,39 @@
-# Uncomment this line to define a global platform for your project
+# Set platform to 15.0 as required by the latest cloud_firestore
 platform :ios, '15.0'
 
-# CocoaPods analytics sends network stats statistics to the CocoaPods team.
-# Empty file or project_name.path logic usually goes here.
+# --- START FLUTTER LOADER ---
+# This section tells the Podfile how to find the Flutter build tools
+# so that the 'flutter_install_all_ios_pods' method works.
+def flutter_root
+  generated_xcode_build_settings_path = File.expand_path(File.join('..', 'Flutter', 'Generated.xcconfig'), __FILE__)
+  unless File.exist?(generated_xcode_build_settings_path)
+    raise "#{generated_xcode_build_settings_path} must exist. If you're running pod install manually, make sure flutter pub get has been run."
+  end
 
-install! 'cocoapods', :deterministic_uuids => false
+  File.foreach(generated_xcode_build_settings_path) do |line|
+    matches = line.match(/\AFLUTTER_ROOT=(.*)\z/)
+    return matches[1].strip if matches
+  end
+  raise "FLUTTER_ROOT not found in #{generated_xcode_build_settings_path}. Try deleting Generated.xcconfig, then run flutter pub get"
+end
+
+require File.expand_path(File.join('packages', 'flutter_tools', 'bin', 'podhelper'), flutter_root)
+# --- END FLUTTER LOADER ---
 
 target 'Runner' do
   use_frameworks!
   use_modular_headers!
 
+  # This is the line that was failing before
   flutter_install_all_ios_pods File.dirname(File.realpath(__FILE__))
 end
 
 post_install do |installer|
   installer.pods_project.targets.each do |target|
     flutter_additional_ios_build_settings(target)
+    
+    # This loop ensures every single plugin is forced to iOS 15.0
     target.build_configurations.each do |config|
-      # This ensures every plugin uses iOS 15.0
       config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.0'
     end
   end
