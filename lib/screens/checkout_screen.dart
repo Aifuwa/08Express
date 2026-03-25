@@ -99,7 +99,7 @@ class _CheckoutScreenState extends State<CheckoutScreen> with TickerProviderStat
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Row(children: [const Icon(Icons.check_circle, color: Colors.white), const SizedBox(width: 10), Text('$label copied to clipboard!')]),
       behavior: SnackBarBehavior.floating,
-      backgroundColor: Colors.blueAccent.shade700,
+      backgroundColor: const Color.fromARGB(255, 113, 113, 113),
       margin: const EdgeInsets.all(20),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
     ));

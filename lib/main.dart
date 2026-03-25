@@ -65,7 +65,6 @@ void main() async {
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
   // 2. BOOTSTRAP: Load SharedPreferences BEFORE the app runs
-  // This prevents the onboarding screen from "getting stuck" in a loop
   final prefs = await SharedPreferences.getInstance();
   final bool isFirstTime = prefs.getBool('isFirstTime') ?? true;
 
@@ -229,7 +228,6 @@ class _MyAppState extends State<MyApp> {
             ),
           ),
         ),
-        // Pass the pre-loaded isFirstTime into the Gatekeeper
         home: RootGatekeeper(isFirstTime: widget.isFirstTime),
         routes: {
           '/home': (context) => const HomeScreen(),
@@ -241,7 +239,7 @@ class _MyAppState extends State<MyApp> {
 }
 
 // ==========================================
-// PROFESSIONAL GATEKEEPER (FIXED)
+// PROFESSIONAL GATEKEEPER (REACTIVE GUEST FIX)
 // ==========================================
 class RootGatekeeper extends StatefulWidget {
   final bool isFirstTime;
@@ -257,39 +255,42 @@ class _RootGatekeeperState extends State<RootGatekeeper> {
   @override
   void initState() {
     super.initState();
-    // Start splash timer immediately
-    Timer(const Duration(seconds: 4), () {
+    // Splash duration
+    Timer(const Duration(milliseconds: 3500), () {
       if (mounted) setState(() => _isSplashFinished = true);
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    // Stage 1: Always show splash first
+    // 1. Show Splash Screen first
     if (!_isSplashFinished) return const SplashScreen();
 
-    // Stage 2: We use the pre-loaded boolean from main()
-    // We check the Provider to see if onboarding was JUST completed
     return Consumer<UserProvider>(
       builder: (context, userProv, _) {
-        // If they are brand new and haven't clicked 'Explore' yet
+        // 2. If it is a new user and hasn't clicked 'Explore'
         if (widget.isFirstTime && !userProv.isIntroCompleted) {
           return const OnboardingScreen();
         }
 
-        // Stage 3: Returning user or Onboarding just finished -> Check Auth
+        // 3. CRITICAL GUEST CHECK: If user clicked 'Continue as Guest', go to Home
+        if (userProv.isGuest) {
+          return const HomeScreen();
+        }
+
+        // 4. Otherwise, check Firebase Auth Status
         return StreamBuilder<User?>(
           stream: FirebaseAuth.instance.authStateChanges(),
           builder: (context, authSnapshot) {
-            // While connecting to the auth stream, keep a nice white background or splash
+            // Keep splash visual during connection logic
             if (authSnapshot.connectionState == ConnectionState.waiting) {
-              return const Scaffold(backgroundColor: Colors.white, body: Center(child: SplashScreen()));
+              return const SplashScreen();
             }
 
-            // User is logged in -> Go Home
+            // User is logged in to Firebase
             if (authSnapshot.hasData) return const HomeScreen();
 
-            // User is logged out -> Go to Auth/Login Screen
+            // Default fallback: Go to Login/Auth Screen
             return const AuthScreen();
           },
         );

@@ -38,7 +38,28 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
     super.dispose();
   }
 
-  // --- TRANSITION LOGIC ---
+  // --- GUEST ENTRY LOGIC ---
+  Future<void> _handleGuestEntry() async {
+    final userProv = Provider.of<UserProvider>(context, listen: false);
+    
+    // 1. Start transition overlay
+    userProv.startLoginTransition();
+    
+    // 2. Set provider to Guest Mode
+    userProv.enterGuestMode();
+
+    // 3. Small delay for smooth visual transition
+    await Future.delayed(const Duration(milliseconds: 800));
+
+    if (mounted) {
+      Navigator.pushReplacement(
+        context, 
+        MaterialPageRoute(builder: (_) => const HomeScreen(isNewUser: false)),
+      );
+    }
+  }
+
+  // --- TRANSITION LOGIC (FOR LOGIN/REGISTER) ---
   Future<void> _triggerTransition(bool isNew) async {
     if (!mounted) return;
     
@@ -228,11 +249,15 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
                           ],
                         ),
                       ),
+                      // --- GUEST BUTTON FIXED HERE ---
                       if (!isKeyboardOpen && action == AuthAction.signIn) ...[
                         const SizedBox(height: 15),
                         TextButton(
-                          onPressed: () => userProv.enterGuestMode(),
-                          child: const Text("Continue as Guest", style: TextStyle(color: Colors.grey, fontWeight: FontWeight.w600)),
+                          onPressed: _handleGuestEntry, // Calls the navigation logic
+                          child: const Text(
+                            "Continue as Guest", 
+                            style: TextStyle(color: Colors.grey, fontWeight: FontWeight.w700),
+                          ),
                         ),
                       ],
                     ],
@@ -277,9 +302,7 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
                   );
                 }),
 
-                // 4. Phone Auth: Handle SMS Sent (FAIL-SAFE FIX)
-                // We use the generic state listener and cast to dynamic 
-                // to force the compiler to accept 'flowKey'.
+                // 4. Phone Auth: Handle SMS Sent
                 AuthStateChangeAction((context, state) {
                   if (state is SMSCodeSent) {
                     final dynamic dynamicState = state;
