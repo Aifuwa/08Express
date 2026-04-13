@@ -60,6 +60,7 @@ dependencies:
   package_info_plus: ^8.0.0 # Required for Force Update logic
   firebase_crashlytics: ^5.0.6
   shimmer: ^3.0.0
+  firebase_app_check: ^0.4.2
 
   
 dev_dependencies:

@@ -3,12 +3,13 @@ import 'dart:math' as math;
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
-import 'package:firebase_ui_auth/firebase_ui_auth.dart';
 import 'package:provider/provider.dart';
+// --- FIX: Hide conflicting names from core firebase_auth ---
+import 'package:firebase_auth/firebase_auth.dart' hide EmailAuthProvider, PhoneAuthProvider;
+import 'package:firebase_ui_auth/firebase_ui_auth.dart';
 import 'package:eight_express/providers/user_provider.dart';
 import 'package:eight_express/constants/legal_texts.dart';
 import 'package:eight_express/widgets/custom_loader.dart';
-import 'package:eight_express/screens/home_screen.dart'; 
 
 class AuthScreen extends StatefulWidget {
   const AuthScreen({super.key});
@@ -19,8 +20,6 @@ class AuthScreen extends StatefulWidget {
 
 class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
   late AnimationController _bgAnimController;
-  
-  // Flag to prevent event conflict between UserCreated and SignedIn
   bool _justRegistered = false; 
 
   @override
@@ -36,54 +35,6 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
   void dispose() {
     _bgAnimController.dispose();
     super.dispose();
-  }
-
-  // --- GUEST ENTRY LOGIC ---
-  Future<void> _handleGuestEntry() async {
-    final userProv = Provider.of<UserProvider>(context, listen: false);
-    
-    // 1. Start transition overlay
-    userProv.startLoginTransition();
-    
-    // 2. Set provider to Guest Mode
-    userProv.enterGuestMode();
-
-    // 3. Small delay for smooth visual transition
-    await Future.delayed(const Duration(milliseconds: 800));
-
-    if (mounted) {
-      Navigator.pushReplacement(
-        context, 
-        MaterialPageRoute(builder: (_) => const HomeScreen(isNewUser: false)),
-      );
-    }
-  }
-
-  // --- TRANSITION LOGIC (FOR LOGIN/REGISTER) ---
-  Future<void> _triggerTransition(bool isNew) async {
-    if (!mounted) return;
-    
-    final userProv = Provider.of<UserProvider>(context, listen: false);
-    
-    // 1. Start the blurred loading overlay
-    userProv.startLoginTransition();
-
-    // 2. WAIT for Profile to actually load from Firestore
-    int retries = 0;
-    while (!userProv.isProfileLoaded && retries < 20) {
-      await Future.delayed(const Duration(milliseconds: 200));
-      retries++;
-    }
-
-    // 3. Navigate only after data is ready
-    if (mounted) {
-      Navigator.pushReplacement(
-        context, 
-        MaterialPageRoute(
-          builder: (_) => HomeScreen(isNewUser: isNew),
-        ),
-      );
-    }
   }
 
   // --- LEGAL MODAL HELPER ---
@@ -112,8 +63,12 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
           const SizedBox(height: 20),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx),
-            style: ElevatedButton.styleFrom(minimumSize: const Size(200, 50)),
-            child: const Text("Close"),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFFE7F2D), 
+              shape: const StadiumBorder(),
+              padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 15)
+            ),
+            child: const Text("Close", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
           )
         ]),
       ),
@@ -139,39 +94,28 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
   Widget build(BuildContext context) {
     const Color orange = Color(0xFFFE7F2D);
     const Color darkBlue = Color(0xFF0D47A1);
-    const Color midBlue = Color(0xFF1976D2);
-    const Color lightBlue = Color(0xFF42A5F5);
-
-    final double keyboardPadding = MediaQuery.of(context).viewInsets.bottom;
-    final bool isKeyboardOpen = keyboardPadding > 0;
     final userProv = Provider.of<UserProvider>(context);
+    final bool isKeyboardOpen = MediaQuery.of(context).viewInsets.bottom > 0;
 
     return Scaffold(
-      resizeToAvoidBottomInset: true,
       backgroundColor: Colors.white,
       body: Stack(
         children: [
-          // 1. MAIN FIREBASE AUTH UI
+          // 1. STANDARD FIREBASE UI COMPONENT
           Theme(
             data: ThemeData(
               useMaterial3: true,
-              brightness: Brightness.light,
               colorScheme: ColorScheme.fromSeed(seedColor: orange, primary: orange),
               inputDecorationTheme: InputDecorationTheme(
                 filled: true,
                 fillColor: Colors.white,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
                 enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(16),
-                  borderSide: BorderSide(color: Colors.grey.shade300, width: 1.5),
+                  borderRadius: BorderRadius.circular(16), 
+                  borderSide: BorderSide(color: Colors.grey.shade300)
                 ),
                 focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(16),
-                  borderSide: const BorderSide(color: orange, width: 2),
-                ),
-                errorBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(16),
-                  borderSide: const BorderSide(color: Colors.redAccent, width: 1.5),
+                  borderRadius: BorderRadius.circular(16), 
+                  borderSide: const BorderSide(color: orange, width: 2)
                 ),
               ),
               elevatedButtonTheme: ElevatedButtonThemeData(
@@ -180,26 +124,17 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
                   foregroundColor: Colors.white,
                   minimumSize: const Size(double.infinity, 58),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                  elevation: 2,
                 ),
               ),
             ),
             child: SignInScreen(
-              providers: [
-                EmailAuthProvider(), 
-                PhoneAuthProvider(),
-              ],
-              headerMaxExtent: isKeyboardOpen ? 120 : 230,
+              providers: [EmailAuthProvider()],
+              headerMaxExtent: isKeyboardOpen ? 120 : 250,
               headerBuilder: (context, constraints, shrinkOffset) {
                 return Container(
                   width: double.infinity,
                   decoration: const BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [darkBlue, midBlue, lightBlue],
-                      stops: [0.1, 0.6, 1.0],
-                    ),
+                    gradient: LinearGradient(colors: [darkBlue, Color(0xFF42A5F5)]),
                   ),
                   child: Stack(
                     alignment: Alignment.center,
@@ -211,19 +146,17 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
                       Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(Icons.local_shipping_rounded, size: isKeyboardOpen ? 40 : 55, color: Colors.white),
-                          if (!isKeyboardOpen) ...[
-                            const SizedBox(height: 10),
+                          const Icon(Icons.local_shipping_rounded, size: 55, color: Colors.white),
+                          if (!isKeyboardOpen) 
                             const Text(
                               "08Express", 
                               style: TextStyle(
                                 color: Colors.white, 
                                 fontSize: 36, 
                                 fontWeight: FontWeight.w900, 
-                                letterSpacing: 2,
-                              ),
+                                letterSpacing: 2
+                              )
                             ),
-                          ],
                         ],
                       ),
                     ],
@@ -233,117 +166,87 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
               footerBuilder: (context, action) {
                 return Padding(
                   padding: const EdgeInsets.only(top: 25, bottom: 10),
-                  child: Column(
-                    children: [
-                      RichText(
-                        textAlign: TextAlign.center,
-                        text: TextSpan(
-                          style: const TextStyle(color: Colors.black45, fontSize: 11.5, height: 1.5),
-                          children: [
-                            const TextSpan(text: "By continuing, you agree to our "),
-                            _linkSpan("Terms", () => _showLegalModal("Terms & Conditions", LegalTexts.termsAndConditions)),
-                            const TextSpan(text: ", "),
-                            _linkSpan("Privacy", () => _showLegalModal("Privacy Policy", LegalTexts.privacyPolicy)),
-                            const TextSpan(text: " and "),
-                            _linkSpan("Refund Policy", () => _showLegalModal("Refund Policy", LegalTexts.refundPolicy)),
-                          ],
+                  child: Column(children: [
+                    RichText(
+                      textAlign: TextAlign.center,
+                      text: TextSpan(
+                        style: const TextStyle(color: Colors.black45, fontSize: 11.5, height: 1.5),
+                        children: [
+                          const TextSpan(text: "By continuing, you agree to our "),
+                          _linkSpan("Terms", () => _showLegalModal("Terms & Conditions", LegalTexts.termsAndConditions)),
+                          const TextSpan(text: ", "),
+                          _linkSpan("Privacy", () => _showLegalModal("Privacy Policy", LegalTexts.privacyPolicy)),
+                          const TextSpan(text: " and "),
+                          _linkSpan("Refund Policy", () => _showLegalModal("Refund Policy", LegalTexts.refundPolicy)),
+                        ],
+                      ),
+                    ),
+                    if (!isKeyboardOpen && action == AuthAction.signIn) ...[
+                      const SizedBox(height: 25),
+                      // --- GUEST BUTTON ---
+                      TextButton(
+                        onPressed: () => userProv.enterGuestMode(),
+                        child: const Text(
+                          "CONTINUE AS GUEST", 
+                          style: TextStyle(color: Colors.grey, fontWeight: FontWeight.w900, fontSize: 13)
                         ),
                       ),
-                      // --- GUEST BUTTON FIXED HERE ---
-                      if (!isKeyboardOpen && action == AuthAction.signIn) ...[
-                        const SizedBox(height: 15),
-                        TextButton(
-                          onPressed: _handleGuestEntry, // Calls the navigation logic
-                          child: const Text(
-                            "Continue as Guest", 
-                            style: TextStyle(color: Colors.grey, fontWeight: FontWeight.w700),
-                          ),
-                        ),
-                      ],
                     ],
-                  ),
+                  ]),
                 );
               },
               actions: [
-                // 1. New User Registration
+                // SIGN IN ACTION
+                AuthStateChangeAction<SignedIn>((context, state) {
+                  // We notify the provider to show the transition loader
+                  userProv.startLoginTransition();
+                  // The RootGatekeeper in main.dart watches authStateChanges()
+                  // and will move to HomeScreen automatically.
+                }),
+
+                // REGISTRATION ACTION
                 AuthStateChangeAction<UserCreated>((context, state) async {
                   _justRegistered = true; 
                   final user = state.credential.user;
                   if (user != null) {
+                    userProv.startLoginTransition();
+                    await user.sendEmailVerification();
                     await userProv.createInitialUserDocument(user);
-                    if (mounted) await _triggerTransition(true); 
                   }
                 }),
 
-                // 2. Existing User Sign In
-                AuthStateChangeAction<SignedIn>((context, state) async {
-                  if (_justRegistered) return;
-                  if (mounted) await _triggerTransition(false);
-                }),
-
-                // 3. Forgot Password Navigation
+                // FORGOT PASSWORD
                 ForgotPasswordAction((context, email) {
                   Navigator.push(
                     context, 
-                    MaterialPageRoute(
-                      builder: (context) => ForgotPasswordScreen(
-                        email: email,
-                        headerMaxExtent: 200,
-                        headerBuilder: (context, constraints, shrinkOffset) {
-                          return Container(
-                            color: darkBlue,
-                            child: const Center(
-                              child: Icon(Icons.lock_reset, size: 80, color: Colors.white),
-                            ),
-                          );
-                        },
-                      ),
-                    ),
+                    MaterialPageRoute(builder: (context) => ForgotPasswordScreen(email: email))
                   );
-                }),
-
-                // 4. Phone Auth: Handle SMS Sent
-                AuthStateChangeAction((context, state) {
-                  if (state is SMSCodeSent) {
-                    final dynamic dynamicState = state;
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => SMSCodeInputScreen(
-                          flowKey: dynamicState.flowKey, 
-                          actions: [
-                            AuthStateChangeAction<SignedIn>((context, state) {
-                              _triggerTransition(false);
-                            }),
-                          ],
-                        ),
-                      ),
-                    );
-                  }
                 }),
               ],
             ),
           ),
 
-          // 2. PREMIUM TRANSITION OVERLAY
+          // 2. PREMIUM BLUR OVERLAY (Visible during transition)
           if (userProv.isTransitioning)
             Positioned.fill(
               child: BackdropFilter(
                 filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
                 child: Container(
-                  color: Colors.white.withOpacity(0.85),
-                  child: Column(
+                  color: Colors.white.withOpacity(0.8),
+                  child: const Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      const CustomLoader(size: 90),
-                      const SizedBox(height: 25),
+                      CustomLoader(size: 90),
+                      SizedBox(height: 25),
                       Text(
-                        "Securing your shopping session...", 
-                        textAlign: TextAlign.center,
-                        style: TextStyle(fontSize: 19, fontWeight: FontWeight.bold, color: darkBlue.withOpacity(0.8)),
+                        "Securing your session...", 
+                        style: TextStyle(fontSize: 19, fontWeight: FontWeight.bold)
                       ),
-                      const SizedBox(height: 8),
-                      const Text("Preparing your 08Express experience", style: TextStyle(color: Colors.grey, fontSize: 14)),
+                      SizedBox(height: 5),
+                      Text(
+                        "Preparing your 08Express experience", 
+                        style: TextStyle(color: Colors.grey)
+                      ),
                     ],
                   ),
                 ),
@@ -357,7 +260,11 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
   TextSpan _linkSpan(String text, VoidCallback onTap) {
     return TextSpan(
       text: text,
-      style: const TextStyle(color: Colors.blue, fontWeight: FontWeight.bold, decoration: TextDecoration.underline),
+      style: const TextStyle(
+        color: Colors.blue, 
+        fontWeight: FontWeight.bold, 
+        decoration: TextDecoration.underline
+      ),
       recognizer: TapGestureRecognizer()..onTap = onTap,
     );
   }

@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart'; // Required for kDebugMode
+import 'package:firebase_app_check/firebase_app_check.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:provider/provider.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -64,6 +66,14 @@ void main() async {
   // 1. Initialize Firebase
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
+  // --- THE FIX FOR 403 ERRORS & STUCK LOGINS ---
+  // We use the Debug provider in debug mode to bypass the Play Integrity check 
+  // which causes the 403 error during development.
+  await FirebaseAppCheck.instance.activate(
+    androidProvider: kDebugMode ? AndroidProvider.debug : AndroidProvider.playIntegrity,
+    appleProvider: AppleProvider.deviceCheck,
+  );
+
   // 2. BOOTSTRAP: Load SharedPreferences BEFORE the app runs
   final prefs = await SharedPreferences.getInstance();
   final bool isFirstTime = prefs.getBool('isFirstTime') ?? true;
@@ -104,10 +114,9 @@ void main() async {
     alert: true, badge: true, sound: true,
   );
 
-  // 7. Auth UI Config
+  // 7. Auth UI Config (Standard Email Only for reliability)
   auth_ui.FirebaseUIAuth.configureProviders([
     auth_ui.EmailAuthProvider(),
-    auth_ui.PhoneAuthProvider(),
   ]);
 
   runApp(MyApp(isFirstTime: isFirstTime));
@@ -196,17 +205,10 @@ class _MyAppState extends State<MyApp> {
         ChangeNotifierProvider(create: (_) => UserProvider()),
         ChangeNotifierProxyProvider<UserProvider, CartProvider>(
           create: (_) => CartProvider(),
-          update: (_, userProv, cartProv) => cartProv!..setUserId(userProv.appUser?.uid),
+          update: (_, userProv, cartProv) => cartProv!..setUserId(userProv.firebaseUser?.uid),
         ),
         ChangeNotifierProvider(create: (_) => CategoryProvider()),
         ChangeNotifierProvider(create: (_) => ProductProvider()),
-        ChangeNotifierProxyProvider2<UserProvider, CartProvider, OrderService>(
-          create: (context) => OrderService(
-            Provider.of<UserProvider>(context, listen: false), 
-            Provider.of<CartProvider>(context, listen: false),
-          ),
-          update: (context, user, cart, prev) => OrderService(user, cart),
-        ),
       ],
       child: MaterialApp(
         title: 'Eight Express',
@@ -239,7 +241,7 @@ class _MyAppState extends State<MyApp> {
 }
 
 // ==========================================
-// PROFESSIONAL GATEKEEPER (REACTIVE GUEST FIX)
+// PROFESSIONAL GATEKEEPER
 // ==========================================
 class RootGatekeeper extends StatefulWidget {
   final bool isFirstTime;
@@ -255,7 +257,7 @@ class _RootGatekeeperState extends State<RootGatekeeper> {
   @override
   void initState() {
     super.initState();
-    // Splash duration
+    // Splash duration: Keep visible for 3.5 seconds to allow background setup
     Timer(const Duration(milliseconds: 3500), () {
       if (mounted) setState(() => _isSplashFinished = true);
     });
@@ -263,34 +265,37 @@ class _RootGatekeeperState extends State<RootGatekeeper> {
 
   @override
   Widget build(BuildContext context) {
-    // 1. Show Splash Screen first
+    // Stage 1: Always show splash first while the app initializes
     if (!_isSplashFinished) return const SplashScreen();
 
     return Consumer<UserProvider>(
       builder: (context, userProv, _) {
-        // 2. If it is a new user and hasn't clicked 'Explore'
+        // Stage 2: Handle first-time onboarding
         if (widget.isFirstTime && !userProv.isIntroCompleted) {
           return const OnboardingScreen();
         }
 
-        // 3. CRITICAL GUEST CHECK: If user clicked 'Continue as Guest', go to Home
+        // Stage 3: Instant Guest Access
         if (userProv.isGuest) {
           return const HomeScreen();
         }
 
-        // 4. Otherwise, check Firebase Auth Status
+        // Stage 4: Reactive Auth Handling
+        // We listen to the raw Firebase Stream to move the user instantly
         return StreamBuilder<User?>(
           stream: FirebaseAuth.instance.authStateChanges(),
           builder: (context, authSnapshot) {
-            // Keep splash visual during connection logic
+            // While we are figuring out the connection, keep the splash visual
             if (authSnapshot.connectionState == ConnectionState.waiting) {
               return const SplashScreen();
             }
 
-            // User is logged in to Firebase
-            if (authSnapshot.hasData) return const HomeScreen();
+            // User is already signed in -> Enter Home
+            if (authSnapshot.hasData && authSnapshot.data != null) {
+              return const HomeScreen();
+            }
 
-            // Default fallback: Go to Login/Auth Screen
+            // Fallback: No user found, go to Auth/Login screen
             return const AuthScreen();
           },
         );
