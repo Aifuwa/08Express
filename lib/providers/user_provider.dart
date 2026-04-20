@@ -430,5 +430,5 @@ class UserProvider with ChangeNotifier {
        debugPrint("Upload failed: $e");
        rethrow;
      }
-  }
+  } 
 }
